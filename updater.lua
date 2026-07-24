@@ -91,6 +91,7 @@ local Button = luajava.bindClass("android.widget.Button")
 local Color = luajava.bindClass("android.graphics.Color")
 local View = luajava.bindClass("android.view.View")
 local Byte = luajava.bindClass("java.lang.Byte")
+local Thread = luajava.bindClass("java.lang.Thread")
 
 local mainHandler = Handler(Looper.getMainLooper())
 local executorService = Executors.newCachedThreadPool()
@@ -147,7 +148,8 @@ end
 
 local function fetchUrlText(urlString)
   local currentUrl = urlString
-  local cacheBuster = "cb=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+  pcall(function() math.randomseed(os.time() + math.floor(os.clock() * 1000)) end)
+  local cacheBuster = "cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
   if not currentUrl:find("%?") then
     currentUrl = currentUrl .. "?" .. cacheBuster
   else
@@ -164,8 +166,11 @@ local function fetchUrlText(urlString)
       conn.setReadTimeout(30000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
+      pcall(function() conn.setDefaultUseCaches(false) end)
       conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-      conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+      conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
+      conn.setRequestProperty("Pragma", "no-cache")
+      conn.setRequestProperty("Expires", "0")
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -201,7 +206,8 @@ end
 
 local function downloadFile(urlString, destFile)
   local currentUrl = urlString
-  local cacheBuster = "cb=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+  pcall(function() math.randomseed(os.time() + math.floor(os.clock() * 1000)) end)
+  local cacheBuster = "cb=" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
   if not currentUrl:find("%?") then
     currentUrl = currentUrl .. "?" .. cacheBuster
   else
@@ -217,6 +223,7 @@ local function downloadFile(urlString, destFile)
       conn.setReadTimeout(15000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
+      pcall(function() conn.setDefaultUseCaches(false) end)
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -591,6 +598,7 @@ function updater.showRestartDialog()
 end
 
 function updater.checkUpdate(onFinished)
+  local startTime = os.time()
   runOnUI(function()
     updater.showLoadingDialog("Checking for update...")
   end)
@@ -598,6 +606,11 @@ function updater.checkUpdate(onFinished)
   runInBackground(function()
     local onlineVersionRaw, errDetail = fetchUrlText(updater.config.VERSION_URL)
     
+    local elapsedTime = os.time() - startTime
+    if elapsedTime < 1 then
+      pcall(function() Thread.sleep(1000) end)
+    end
+
     if not onlineVersionRaw then
       runOnUI(function()
         dismissActiveDialog()
