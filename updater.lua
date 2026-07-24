@@ -1,6 +1,63 @@
-local utils = require("utils")
-
 local updater = {}
+
+local Dialog = luajava.bindClass("android.app.Dialog")
+local WindowManager = luajava.bindClass("android.view.WindowManager")
+local Build = luajava.bindClass("android.os.Build")
+
+local activeDialog = nil
+
+local function dismissActiveDialog()
+  if activeDialog then
+    pcall(function() activeDialog.dismiss() end)
+    activeDialog = nil
+  end
+end
+
+local function setScreen(view)
+  local ok = pcall(function()
+    service.setContentView(view)
+  end)
+  if not ok then
+    pcall(function()
+      dismissActiveDialog()
+      local dialog = Dialog(service)
+      dialog.requestWindowFeature(1)
+      dialog.setContentView(view)
+      local window = dialog.getWindow()
+      if window then
+        if Build.VERSION.SDK_INT >= 26 then
+          window.setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+        else
+          window.setType(2003)
+        end
+        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+      end
+      dialog.show()
+      activeDialog = dialog
+    end)
+  end
+end
+
+local function closeExtension()
+  dismissActiveDialog()
+  pcall(function() service.finish() end)
+end
+
+local function enableBackKey(view, onBackFn)
+  pcall(function()
+    view.setFocusableInTouchMode(true)
+    view.requestFocus()
+    view.setOnKeyListener(luajava.createProxy("android.view.View$OnKeyListener", {
+      onKey = function(v, keyCode, event)
+        if event.getAction() == 0 and keyCode == 4 then
+          if onBackFn then onBackFn() end
+          return true
+        end
+        return false
+      end
+    }))
+  end)
+end
 
 updater.config = {
   CURRENT_VERSION = "1.0",
@@ -12,7 +69,7 @@ updater.config = {
   UPDATER_FILE = "updater.lua",
   EXCLUDE_FILES = {
     ["virgin.txt"] = true,
-    ["what's new.txt"] = true
+    ["what's new.txt"] = true,
   }
 }
 
@@ -34,37 +91,28 @@ local Button = luajava.bindClass("android.widget.Button")
 local Color = luajava.bindClass("android.graphics.Color")
 local View = luajava.bindClass("android.view.View")
 local Byte = luajava.bindClass("java.lang.Byte")
-local StringClass = luajava.bindClass("java.lang.String")
 
 local mainHandler = Handler(Looper.getMainLooper())
 local executorService = Executors.newCachedThreadPool()
 
 local function makeRunnable(fn)
   return luajava.createProxy("java.lang.Runnable", {
-    run = function()
-      fn()
-    end
+    run = function() fn() end
   })
 end
 
 local function makeOnClickListener(fn)
   return luajava.createProxy("android.view.View$OnClickListener", {
-    onClick = function(v)
-      fn(v)
-    end
+    onClick = function(v) fn(v) end
   })
 end
 
 local function runOnUI(fn)
-  mainHandler.post(makeRunnable(function()
-    fn()
-  end))
+  mainHandler.post(makeRunnable(function() fn() end))
 end
 
 local function runInBackground(fn)
-  executorService.execute(makeRunnable(function()
-    fn()
-  end))
+  executorService.execute(makeRunnable(function() fn() end))
 end
 
 local function showToast(msg)
@@ -94,8 +142,7 @@ local function cleanHtmlContent(rawHtml)
   if #extractedLines > 0 then
     return table.concat(extractedLines, "\n")
   end
-  local plain = rawHtml:gsub("<script.-</script>", ""):gsub("<style.-</style>", ""):gsub("<[^>]+>", "")
-  return plain
+  return rawHtml:gsub("<script.-</script>", ""):gsub("<style.-</style>", ""):gsub("<[^>]+>", "")
 end
 
 local function fetchUrlText(urlString)
@@ -113,14 +160,12 @@ local function fetchUrlText(urlString)
       local url = URL(currentUrl)
       conn = url.openConnection()
       conn.setRequestMethod("GET")
-      conn.setConnectTimeout(8000)
-      conn.setReadTimeout(8000)
+      conn.setConnectTimeout(30000)
+      conn.setReadTimeout(30000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
-      conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+      conn.setRequestProperty("User-Agent", "Mozilla/5.0")
       conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
-      conn.setRequestProperty("Pragma", "no-cache")
-      conn.setRequestProperty("Expires", "0")
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -131,9 +176,7 @@ local function fetchUrlText(urlString)
         end
         return nil
       end
-      if code ~= 200 then
-        return nil
-      end
+      if code ~= 200 then return nil end
       local reader = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
       local lines = {}
       local line = reader.readLine()
@@ -144,14 +187,10 @@ local function fetchUrlText(urlString)
       reader.close()
       return table.concat(lines, "\n")
     end)
-    if conn then
-      pcall(function() conn.disconnect() end)
-    end
+    if conn then pcall(function() conn.disconnect() end) end
     if success then
-      if res ~= "REDIRECT" then
-        if res then
-          return cleanHtmlContent(res)
-        end
+      if res ~= "REDIRECT" and res then
+        return cleanHtmlContent(res)
       end
     else
       lastErr = tostring(res)
@@ -178,8 +217,6 @@ local function downloadFile(urlString, destFile)
       conn.setReadTimeout(15000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
-      conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
-      conn.setRequestProperty("Pragma", "no-cache")
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -190,9 +227,7 @@ local function downloadFile(urlString, destFile)
         end
         return false
       end
-      if code ~= 200 then
-        return false
-      end
+      if code ~= 200 then return false end
       local input = conn.getInputStream()
       local output = FileOutputStream(destFile)
       local buffer = luajava.newArray(Byte.TYPE, 4096)
@@ -205,9 +240,7 @@ local function downloadFile(urlString, destFile)
       input.close()
       return true
     end)
-    if conn then
-      pcall(function() conn.disconnect() end)
-    end
+    if conn then pcall(function() conn.disconnect() end) end
     if success then
       if res ~= "REDIRECT" then
         return res == true
@@ -298,82 +331,136 @@ local function updateVersionInFile(newVersion)
   end
 end
 
-function updater.showErrorDialog(msg, onDismiss)
-  local root = LinearLayout(service)
-  root.setOrientation(LinearLayout.VERTICAL)
-  root.setBackgroundColor(Color.BLACK)
+function updater.showLoadingDialog(msg)
+  local rootLayout = LinearLayout(service)
+  rootLayout.setOrientation(LinearLayout.VERTICAL)
+  rootLayout.setBackgroundColor(Color.BLACK)
 
-  local scroll = ScrollView(service)
-  local layout = LinearLayout(service)
-  layout.setOrientation(LinearLayout.VERTICAL)
-  layout.setPadding(20, 20, 20, 20)
+  local layoutInner = LinearLayout(service)
+  layoutInner.setOrientation(LinearLayout.VERTICAL)
+  layoutInner.setPadding(20, 20, 20, 20)
+
+  local tvMsg = TextView(service)
+  tvMsg.setText(msg or "Checking for update...")
+  tvMsg.setTextSize(18)
+  tvMsg.setTextColor(Color.WHITE)
+  tvMsg.setPadding(0, 20, 0, 20)
+  layoutInner.addView(tvMsg)
+
+  rootLayout.addView(layoutInner)
+
+  enableBackKey(rootLayout, function() end)
+
+  setScreen(rootLayout)
+end
+
+function updater.showNoUpdateDialog(onDismiss)
+  local rootLayout = LinearLayout(service)
+  rootLayout.setOrientation(LinearLayout.VERTICAL)
+  rootLayout.setBackgroundColor(Color.BLACK)
+
+  local layoutInner = LinearLayout(service)
+  layoutInner.setOrientation(LinearLayout.VERTICAL)
+  layoutInner.setPadding(20, 20, 20, 20)
+
+  local tvMsg = TextView(service)
+  tvMsg.setText("No updates available")
+  tvMsg.setTextSize(18)
+  tvMsg.setTextColor(Color.GREEN)
+  tvMsg.setPadding(0, 20, 0, 20)
+  layoutInner.addView(tvMsg)
+
+  rootLayout.addView(layoutInner)
+
+  enableBackKey(rootLayout, function() end)
+
+  setScreen(rootLayout)
+
+  mainHandler.postDelayed(makeRunnable(function()
+    dismissActiveDialog()
+    if onDismiss then onDismiss() end
+  end), 1000)
+end
+
+function updater.showErrorDialog(msg, onDismiss)
+  local rootLayout = LinearLayout(service)
+  rootLayout.setOrientation(LinearLayout.VERTICAL)
+  rootLayout.setBackgroundColor(Color.BLACK)
+
+  local scrollLayout = ScrollView(service)
+  local layoutInner = LinearLayout(service)
+  layoutInner.setOrientation(LinearLayout.VERTICAL)
+  layoutInner.setPadding(20, 20, 20, 20)
 
   local tvMsg = TextView(service)
   tvMsg.setText("Error Checking Update!\n\nDetails:\n" .. tostring(msg) .. "\n\nLocal Version: " .. tostring(updater.config.CURRENT_VERSION))
   tvMsg.setTextSize(18)
   tvMsg.setTextColor(Color.RED)
   tvMsg.setPadding(0, 20, 0, 20)
-  layout.addView(tvMsg)
+  layoutInner.addView(tvMsg)
 
   local btnClose = Button(service)
   btnClose.setText("Close")
   btnClose.setOnClickListener(makeOnClickListener(function()
-    onDismiss()
+    dismissActiveDialog()
+    if onDismiss then onDismiss() end
   end))
-  layout.addView(btnClose)
+  layoutInner.addView(btnClose)
 
-  scroll.addView(layout)
-  root.addView(scroll)
+  scrollLayout.addView(layoutInner)
+  rootLayout.addView(scrollLayout)
 
-  utils.enableBackKey(root, function()
-    onDismiss()
+  enableBackKey(rootLayout, function()
+    dismissActiveDialog()
+    if onDismiss then onDismiss() end
   end)
-
-  utils.setScreen(root)
+  setScreen(rootLayout)
 end
 
 function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
-  local root = LinearLayout(service)
-  root.setOrientation(LinearLayout.VERTICAL)
-  root.setBackgroundColor(Color.BLACK)
+  local rootLayout = LinearLayout(service)
+  rootLayout.setOrientation(LinearLayout.VERTICAL)
+  rootLayout.setBackgroundColor(Color.BLACK)
 
   local isDownloading = false
 
-  utils.enableBackKey(root, function()
+  enableBackKey(rootLayout, function()
     if isDownloading then
       Toast.makeText(service, "Downloading in progress...", Toast.LENGTH_SHORT).show()
     else
-      onDismiss()
+      dismissActiveDialog()
+      if onDismiss then onDismiss() end
     end
   end)
 
-  local scroll = ScrollView(service)
-  local layout = LinearLayout(service)
-  layout.setOrientation(LinearLayout.VERTICAL)
-  layout.setPadding(20, 20, 20, 20)
+  local scrollLayout = ScrollView(service)
+  local layoutInner = LinearLayout(service)
+  layoutInner.setOrientation(LinearLayout.VERTICAL)
+  layoutInner.setPadding(20, 20, 20, 20)
 
   local btnDismiss = Button(service)
   btnDismiss.setText("Dismiss Update Dialog")
   btnDismiss.setOnClickListener(makeOnClickListener(function()
     if not isDownloading then
-      onDismiss()
+      dismissActiveDialog()
+      if onDismiss then onDismiss() end
     end
   end))
-  layout.addView(btnDismiss)
+  layoutInner.addView(btnDismiss)
 
   local titleView = TextView(service)
   titleView.setText("Update Available: v" .. onlineVersion)
   titleView.setTextSize(20)
   titleView.setTextColor(Color.GREEN)
   titleView.setPadding(0, 10, 0, 10)
-  layout.addView(titleView)
+  layoutInner.addView(titleView)
 
   local headerWhatsNew = TextView(service)
   headerWhatsNew.setText("What's New:")
   headerWhatsNew.setTextSize(18)
   headerWhatsNew.setTextColor(Color.YELLOW)
   headerWhatsNew.setPadding(0, 10, 0, 10)
-  layout.addView(headerWhatsNew)
+  layoutInner.addView(headerWhatsNew)
 
   if whatsNewText and whatsNewText ~= "" then
     for line in whatsNewText:gmatch("[^\r\n]+") do
@@ -382,14 +469,14 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
       lineView.setTextSize(16)
       lineView.setTextColor(Color.WHITE)
       lineView.setPadding(0, 5, 0, 5)
-      layout.addView(lineView)
+      layoutInner.addView(lineView)
     end
   else
     local lineView = TextView(service)
     lineView.setText("No details provided.")
     lineView.setTextSize(16)
     lineView.setTextColor(Color.WHITE)
-    layout.addView(lineView)
+    layoutInner.addView(lineView)
   end
 
   local btnUpdate = Button(service)
@@ -430,9 +517,7 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
         extractZipExcluding(tempZip, destDir, updater.config.EXCLUDE_FILES)
       end)
       
-      if tempZip.exists() then
-        tempZip.delete()
-      end
+      if tempZip.exists() then tempZip.delete() end
 
       updateVersionInFile(onlineVersion)
 
@@ -453,30 +538,30 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
     end
   end))
 
-  layout.addView(btnUpdate)
-  layout.addView(btnCancel)
+  layoutInner.addView(btnUpdate)
+  layoutInner.addView(btnCancel)
 
-  scroll.addView(layout)
-  root.addView(scroll)
-  utils.setScreen(root)
+  scrollLayout.addView(layoutInner)
+  rootLayout.addView(scrollLayout)
+  setScreen(rootLayout)
 end
 
 function updater.showRestartDialog()
-  local root = LinearLayout(service)
-  root.setOrientation(LinearLayout.VERTICAL)
-  root.setBackgroundColor(Color.BLACK)
+  local rootLayout = LinearLayout(service)
+  rootLayout.setOrientation(LinearLayout.VERTICAL)
+  rootLayout.setBackgroundColor(Color.BLACK)
 
-  local scroll = ScrollView(service)
-  local layout = LinearLayout(service)
-  layout.setOrientation(LinearLayout.VERTICAL)
-  layout.setPadding(20, 20, 20, 20)
+  local scrollLayout = ScrollView(service)
+  local layoutInner = LinearLayout(service)
+  layoutInner.setOrientation(LinearLayout.VERTICAL)
+  layoutInner.setPadding(20, 20, 20, 20)
 
   local tvMsg = TextView(service)
   tvMsg.setText("Update completed successfully! Please restart the extension.")
   tvMsg.setTextSize(18)
   tvMsg.setTextColor(Color.GREEN)
   tvMsg.setPadding(0, 20, 0, 20)
-  layout.addView(tvMsg)
+  layoutInner.addView(tvMsg)
 
   local btnRestart = Button(service)
   btnRestart.setText("Restart Extension")
@@ -486,38 +571,38 @@ function updater.showRestartDialog()
         package.loaded[k] = nil
       end
     end
-    pcall(function()
-      utils.closeExtension()
-    end)
+    pcall(function() closeExtension() end)
     mainHandler.postDelayed(makeRunnable(function()
       pcall(function()
         dofile(updater.config.TARGET_PATH .. updater.config.MAIN_FILE)
       end)
     end), 300)
   end))
-  layout.addView(btnRestart)
+  layoutInner.addView(btnRestart)
 
-  scroll.addView(layout)
-  root.addView(scroll)
+  scrollLayout.addView(layoutInner)
+  rootLayout.addView(scrollLayout)
 
-  utils.enableBackKey(root, function()
-    pcall(function()
-      utils.closeExtension()
-    end)
+  enableBackKey(rootLayout, function()
+    pcall(function() closeExtension() end)
   end)
 
-  utils.setScreen(root)
+  setScreen(rootLayout)
 end
 
 function updater.checkUpdate(onFinished)
-  showToast("Checking for updates...")
+  runOnUI(function()
+    updater.showLoadingDialog("Checking for update...")
+  end)
   
   runInBackground(function()
     local onlineVersionRaw, errDetail = fetchUrlText(updater.config.VERSION_URL)
     
     if not onlineVersionRaw then
       runOnUI(function()
-        updater.showErrorDialog(errDetail or "Failed to fetch online version", onFinished)
+        dismissActiveDialog()
+        showToast("Connection error")
+        if onFinished then onFinished() end
       end)
       return
     end
@@ -526,14 +611,13 @@ function updater.checkUpdate(onFinished)
     
     if onlineVersion == updater.config.CURRENT_VERSION then
       runOnUI(function()
-        showToast("No update available.")
-        if onFinished then
-          onFinished()
-        end
+        dismissActiveDialog()
+        updater.showNoUpdateDialog(onFinished)
       end)
     else
       local whatsNewText = fetchUrlText(updater.config.WHATSNEW_URL) or ""
       runOnUI(function()
+        dismissActiveDialog()
         updater.showUpdateDialog(onlineVersion, whatsNewText, onFinished)
       end)
     end
