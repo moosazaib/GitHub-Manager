@@ -4,15 +4,14 @@ local updater = {}
 
 updater.config = {
   CURRENT_VERSION = "1.0",
-  VERSION_URL = "https://github.com/moosazaib/GitHub-Manager/blob/main/version.txt",
-  WHATSNEW_URL = "https://github.com/moosazaib/GitHub-Manager/blob/main/whats_new.txt",
+  VERSION_URL = "https://raw.githubusercontent.com/moosazaib/GitHub-Manager/main/virgin.txt",
+  WHATSNEW_URL = "https://raw.githubusercontent.com/moosazaib/GitHub-Manager/main/what's%20new.txt",
   ZIP_URL = "https://github.com/moosazaib/GitHub-Manager/archive/refs/heads/main.zip",
   TARGET_PATH = "/storage/self/primary/解说/Plugins/GitHub Manager/",
   MAIN_FILE = "main.lua",
   UPDATER_FILE = "updater.lua",
   EXCLUDE_FILES = {
-    ["version.txt"] = true,
-    ["whats_new.txt"] = true,
+    ["virgin.txt"] = true,
     ["what's new.txt"] = true
   }
 }
@@ -21,10 +20,8 @@ local Handler = luajava.bindClass("android.os.Handler")
 local Looper = luajava.bindClass("android.os.Looper")
 local Toast = luajava.bindClass("android.widget.Toast")
 local URL = luajava.bindClass("java.net.URL")
-local HttpURLConnection = luajava.bindClass("java.net.HttpURLConnection")
 local BufferedReader = luajava.bindClass("java.io.BufferedReader")
 local InputStreamReader = luajava.bindClass("java.io.InputStreamReader")
-local StringBuilder = luajava.bindClass("java.lang.StringBuilder")
 local File = luajava.bindClass("java.io.File")
 local FileOutputStream = luajava.bindClass("java.io.FileOutputStream")
 local FileInputStream = luajava.bindClass("java.io.FileInputStream")
@@ -103,6 +100,7 @@ end
 
 local function fetchUrlText(urlString)
   local currentUrl = urlString
+  local lastErr = "Unknown connection error"
   for i = 1, 5 do
     local conn
     local success, res = pcall(function()
@@ -112,7 +110,11 @@ local function fetchUrlText(urlString)
       conn.setConnectTimeout(8000)
       conn.setReadTimeout(8000)
       conn.setInstanceFollowRedirects(true)
+      conn.setUseCaches(false)
       conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+      conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+      conn.setRequestProperty("Pragma", "no-cache")
+      conn.setRequestProperty("Expires", "0")
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -126,28 +128,30 @@ local function fetchUrlText(urlString)
       if code ~= 200 then
         return nil
       end
-      local reader = BufferedReader(InputStreamReader(conn.getInputStream()))
-      local sb = StringBuilder()
+      local reader = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
+      local lines = {}
       local line = reader.readLine()
       while line ~= nil do
-        sb.append(line):append("\n")
+        table.insert(lines, line)
         line = reader.readLine()
       end
       reader.close()
-      return sb.toString()
+      return table.concat(lines, "\n")
     end)
     if conn then
       pcall(function() conn.disconnect() end)
     end
     if success then
       if res ~= "REDIRECT" then
-        return cleanHtmlContent(res)
+        if res then
+          return cleanHtmlContent(res)
+        end
       end
     else
-      return nil
+      lastErr = tostring(res)
     end
   end
-  return nil
+  return nil, lastErr
 end
 
 local function downloadFile(urlString, destFile)
@@ -161,6 +165,9 @@ local function downloadFile(urlString, destFile)
       conn.setConnectTimeout(15000)
       conn.setReadTimeout(15000)
       conn.setInstanceFollowRedirects(true)
+      conn.setUseCaches(false)
+      conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+      conn.setRequestProperty("Pragma", "no-cache")
       local code = conn.getResponseCode()
       if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
         local loc = conn.getHeaderField("Location")
@@ -201,16 +208,18 @@ local function downloadFile(urlString, destFile)
 end
 
 local function deleteDirectoryContents(dir)
-  if not dir or not dir:exists() then return end
+  if not dir or not dir.exists() then return end
   local files = dir.listFiles()
   if files ~= nil then
-    for i = 0, files.length - 1 do
+    for i = 0, #files - 1 do
       local f = files[i]
-      if f:isDirectory() then
-        deleteDirectoryContents(f)
-        f:delete()
-      else
-        f:delete()
+      if f ~= nil then
+        if f.isDirectory() then
+          deleteDirectoryContents(f)
+          f.delete()
+        else
+          f.delete()
+        end
       end
     end
   end
@@ -232,12 +241,12 @@ local function extractZipExcluding(zipFile, destDir, excludeMap)
         local outFile = File(destDir, relativePath)
         
         if entry.isDirectory() then
-          outFile:mkdirs()
+          outFile.mkdirs()
         else
           if not isExcluded then
-            local parent = outFile:getParentFile()
-            if parent and not parent:exists() then
-              parent:mkdirs()
+            local parent = outFile.getParentFile()
+            if parent and not parent.exists() then
+              parent.mkdirs()
             end
             local fos = FileOutputStream(outFile)
             local buf = luajava.newArray(Byte.TYPE, 4096)
@@ -259,36 +268,95 @@ local function extractZipExcluding(zipFile, destDir, excludeMap)
 end
 
 local function updateVersionInFile(newVersion)
-  pcall(function()
-    local filePath = updater.config.TARGET_PATH .. updater.config.UPDATER_FILE
-    local f = File(filePath)
-    if f:exists() then
-      local fis = FileInputStream(f)
-      local reader = BufferedReader(InputStreamReader(fis))
-      local sb = StringBuilder()
-      local line = reader.readLine()
-      while line ~= nil do
-        sb.append(line):append("\n")
-        line = reader.readLine()
-      end
-      reader.close()
-      fis.close()
-
-      local content = sb.toString()
+  updater.config.CURRENT_VERSION = newVersion
+  local filePath = updater.config.TARGET_PATH .. updater.config.UPDATER_FILE
+  local rf = io.open(filePath, "r")
+  if rf then
+    local content = rf:read("*a")
+    rf:close()
+    if content then
       local updatedContent = content:gsub('CURRENT_VERSION%s*=%s*"[^"]+"', 'CURRENT_VERSION = "' .. newVersion .. '"')
-
-      local fos = FileOutputStream(f)
-      fos.write(StringClass(updatedContent).getBytes())
-      fos.close()
+      local wf = io.open(filePath, "w")
+      if wf then
+        wf:write(updatedContent)
+        wf:close()
+      end
     end
+  end
+end
+
+function updater.showNoUpdateDialog(onlineVersion, localVersion, onDismiss)
+  local root = LinearLayout(service)
+  root.setOrientation(LinearLayout.VERTICAL)
+  root.setBackgroundColor(Color.BLACK)
+
+  local scroll = ScrollView(service)
+  local layout = LinearLayout(service)
+  layout.setOrientation(LinearLayout.VERTICAL)
+  layout.setPadding(20, 20, 20, 20)
+
+  local tvMsg = TextView(service)
+  tvMsg.setText("No Update Available!\n\nLocal Version: " .. tostring(localVersion) .. "\nOnline Version: " .. tostring(onlineVersion))
+  tvMsg.setTextSize(18)
+  tvMsg.setTextColor(Color.GREEN)
+  tvMsg.setPadding(0, 20, 0, 20)
+  layout.addView(tvMsg)
+
+  local btnClose = Button(service)
+  btnClose.setText("Close")
+  btnClose.setOnClickListener(makeOnClickListener(function()
+    onDismiss()
+  end))
+  layout.addView(btnClose)
+
+  scroll.addView(layout)
+  root.addView(scroll)
+
+  utils.enableBackKey(root, function()
+    onDismiss()
   end)
+
+  utils.setScreen(root)
+end
+
+function updater.showErrorDialog(msg, onDismiss)
+  local root = LinearLayout(service)
+  root.setOrientation(LinearLayout.VERTICAL)
+  root.setBackgroundColor(Color.BLACK)
+
+  local scroll = ScrollView(service)
+  local layout = LinearLayout(service)
+  layout.setOrientation(LinearLayout.VERTICAL)
+  layout.setPadding(20, 20, 20, 20)
+
+  local tvMsg = TextView(service)
+  tvMsg.setText("Error Checking Update!\n\nDetails:\n" .. tostring(msg) .. "\n\nLocal Version: " .. tostring(updater.config.CURRENT_VERSION))
+  tvMsg.setTextSize(18)
+  tvMsg.setTextColor(Color.RED)
+  tvMsg.setPadding(0, 20, 0, 20)
+  layout.addView(tvMsg)
+
+  local btnClose = Button(service)
+  btnClose.setText("Close")
+  btnClose.setOnClickListener(makeOnClickListener(function()
+    onDismiss()
+  end))
+  layout.addView(btnClose)
+
+  scroll.addView(layout)
+  root.addView(scroll)
+
+  utils.enableBackKey(root, function()
+    onDismiss()
+  end)
+
+  utils.setScreen(root)
 end
 
 function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
   local root = LinearLayout(service)
   root.setOrientation(LinearLayout.VERTICAL)
   root.setBackgroundColor(Color.BLACK)
-  root.setPadding(20, 20, 20, 20)
 
   local isDownloading = false
 
@@ -298,6 +366,11 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
     end
   end)
 
+  local scroll = ScrollView(service)
+  local layout = LinearLayout(service)
+  layout.setOrientation(LinearLayout.VERTICAL)
+  layout.setPadding(20, 20, 20, 20)
+
   local btnDismiss = Button(service)
   btnDismiss.setText("Dismiss Update Dialog")
   btnDismiss.setOnClickListener(makeOnClickListener(function()
@@ -305,11 +378,7 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
       onDismiss()
     end
   end))
-  root.addView(btnDismiss)
-
-  local scroll = ScrollView(service)
-  local layout = LinearLayout(service)
-  layout.setOrientation(LinearLayout.VERTICAL)
+  layout.addView(btnDismiss)
 
   local titleView = TextView(service)
   titleView.setText("Update Available: v" .. onlineVersion)
@@ -377,8 +446,8 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
         extractZipExcluding(tempZip, destDir, updater.config.EXCLUDE_FILES)
       end)
       
-      if tempZip:exists() then
-        tempZip:delete()
+      if tempZip.exists() then
+        tempZip.delete()
       end
 
       updateVersionInFile(onlineVersion)
@@ -413,14 +482,18 @@ function updater.showRestartDialog()
   local root = LinearLayout(service)
   root.setOrientation(LinearLayout.VERTICAL)
   root.setBackgroundColor(Color.BLACK)
-  root.setPadding(20, 20, 20, 20)
+
+  local scroll = ScrollView(service)
+  local layout = LinearLayout(service)
+  layout.setOrientation(LinearLayout.VERTICAL)
+  layout.setPadding(20, 20, 20, 20)
 
   local tvMsg = TextView(service)
   tvMsg.setText("Update completed successfully! Please restart the extension.")
   tvMsg.setTextSize(18)
   tvMsg.setTextColor(Color.GREEN)
   tvMsg.setPadding(0, 20, 0, 20)
-  root.addView(tvMsg)
+  layout.addView(tvMsg)
 
   local btnRestart = Button(service)
   btnRestart.setText("Restart Extension")
@@ -432,7 +505,10 @@ function updater.showRestartDialog()
       end)
     end), 500)
   end))
-  root.addView(btnRestart)
+  layout.addView(btnRestart)
+
+  scroll.addView(layout)
+  root.addView(scroll)
 
   utils.enableBackKey(root, function()
     utils.closeExtension()
@@ -445,12 +521,11 @@ function updater.checkUpdate(onFinished)
   showToast("Checking for updates...")
   
   runInBackground(function()
-    local onlineVersionRaw = fetchUrlText(updater.config.VERSION_URL)
+    local onlineVersionRaw, errDetail = fetchUrlText(updater.config.VERSION_URL)
     
     if not onlineVersionRaw then
-      showToast("Connection error")
       runOnUI(function()
-        onFinished()
+        updater.showErrorDialog(errDetail or "Failed to fetch online version", onFinished)
       end)
       return
     end
@@ -458,9 +533,8 @@ function updater.checkUpdate(onFinished)
     local onlineVersion = onlineVersionRaw:match("^%s*(.-)%s*$")
     
     if onlineVersion == updater.config.CURRENT_VERSION then
-      showToast("No update available")
       runOnUI(function()
-        onFinished()
+        updater.showNoUpdateDialog(onlineVersion, updater.config.CURRENT_VERSION, onFinished)
       end)
     else
       local whatsNewText = fetchUrlText(updater.config.WHATSNEW_URL) or ""
