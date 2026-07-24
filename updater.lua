@@ -100,6 +100,12 @@ end
 
 local function fetchUrlText(urlString)
   local currentUrl = urlString
+  local cacheBuster = "cb=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+  if not currentUrl:find("%?") then
+    currentUrl = currentUrl .. "?" .. cacheBuster
+  else
+    currentUrl = currentUrl .. "&" .. cacheBuster
+  end
   local lastErr = "Unknown connection error"
   for i = 1, 5 do
     local conn
@@ -111,6 +117,7 @@ local function fetchUrlText(urlString)
       conn.setReadTimeout(8000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
+      conn.setDefaultUseCaches(false)
       conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
       conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
       conn.setRequestProperty("Pragma", "no-cache")
@@ -156,6 +163,12 @@ end
 
 local function downloadFile(urlString, destFile)
   local currentUrl = urlString
+  local cacheBuster = "cb=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
+  if not currentUrl:find("%?") then
+    currentUrl = currentUrl .. "?" .. cacheBuster
+  else
+    currentUrl = currentUrl .. "&" .. cacheBuster
+  end
   for i = 1, 5 do
     local conn
     local success, res = pcall(function()
@@ -166,6 +179,7 @@ local function downloadFile(urlString, destFile)
       conn.setReadTimeout(15000)
       conn.setInstanceFollowRedirects(true)
       conn.setUseCaches(false)
+      conn.setDefaultUseCaches(false)
       conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
       conn.setRequestProperty("Pragma", "no-cache")
       local code = conn.getResponseCode()
@@ -270,18 +284,18 @@ end
 local function updateVersionInFile(newVersion)
   updater.config.CURRENT_VERSION = newVersion
   local filePath = updater.config.TARGET_PATH .. updater.config.UPDATER_FILE
-  local rf = io.open(filePath, "r")
-  if rf then
-    local content = rf:read("*a")
-    rf:close()
-    if content then
-      local updatedContent = content:gsub('CURRENT_VERSION%s*=%s*"[^"]+"', 'CURRENT_VERSION = "' .. newVersion .. '"')
-      local wf = io.open(filePath, "w")
-      if wf then
-        wf:write(updatedContent)
-        wf:close()
-      end
-    end
+  local file = File(filePath)
+  if file.exists() then
+    local fis = FileInputStream(file)
+    local bytes = luajava.newArray(Byte.TYPE, file.length())
+    fis.read(bytes)
+    fis.close()
+    local content = StringClass(bytes, "UTF-8").toString()
+    local updatedContent = content:gsub('CURRENT_VERSION%s*=%s*"[^"]+"', 'CURRENT_VERSION = "' .. newVersion .. '"')
+    local fos = FileOutputStream(file)
+    fos.write(StringClass(updatedContent):getBytes("UTF-8"))
+    fos.flush()
+    fos.close()
   end
 end
 
@@ -464,6 +478,11 @@ function updater.showRestartDialog()
   local btnRestart = Button(service)
   btnRestart.setText("Restart Extension")
   btnRestart.setOnClickListener(makeOnClickListener(function()
+    for k, _ in pairs(package.loaded) do
+      if k:find("updater") or k:find("utils") or k:find("main") then
+        package.loaded[k] = nil
+      end
+    end
     utils.closeExtension()
     mainHandler.postDelayed(makeRunnable(function()
       pcall(function()
