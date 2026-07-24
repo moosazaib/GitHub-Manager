@@ -1,7 +1,42 @@
 local utils = require("utils")
 local tokenModule = require("token_module")
 
+local Handler = Handler or luajava.bindClass("android.os.Handler")
+local Looper = Looper or luajava.bindClass("android.os.Looper")
+local Runnable = Runnable or luajava.bindClass("java.lang.Runnable")
+local Toast = Toast or luajava.bindClass("android.os.Toast")
+
 local myReposModule = {}
+
+local function httpRequestWithTimeout(loadingText, url, method, data, callback, fallbackScreen)
+  if loadingText then
+    utils.showLoading(loadingText)
+  end
+  local isCompleted = false
+  local handler = Handler(Looper.getMainLooper())
+
+  local timeoutRunnable = Runnable({
+    run = function()
+      if not isCompleted then
+        isCompleted = true
+        Toast.makeText(service, "Internet error: Request timed out", Toast.LENGTH_SHORT).show()
+        if fallbackScreen then
+          fallbackScreen()
+        end
+      end
+    end
+  })
+
+  handler.postDelayed(timeoutRunnable, 30000)
+
+  utils.httpRequest(url, method, data, function(code, res)
+    if not isCompleted then
+      isCompleted = true
+      handler.removeCallbacks(timeoutRunnable)
+      callback(code, res)
+    end
+  end)
+end
 
 function myReposModule.showFilesList(owner, repo, path, showMainScreen)
   if utils.loadToken() == "" then
@@ -9,9 +44,8 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
     return
   end
 
-  utils.showLoading("Loading files...")
   local url = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(path)
-  utils.httpRequest(url, "GET", nil, function(code, res)
+  httpRequestWithTimeout("Loading files...", url, "GET", nil, function(code, res)
     if code == 404 then
       local root = LinearLayout(service)
       root.setOrientation(LinearLayout.VERTICAL)
@@ -100,8 +134,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
             if itemType == "dir" then
               myReposModule.showFilesList(owner, repo, itemPath, showMainScreen)
             else
-              utils.showLoading("Opening file...")
-              utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "GET", nil, function(fCode, fRes)
+              httpRequestWithTimeout("Opening file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "GET", nil, function(fCode, fRes)
                 if fCode == 200 then
                   local fObj = JSONObject(fRes)
                   local rawContent = fObj.getString("content")
@@ -176,20 +209,18 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                       if utils.normalizeName(newName) ~= utils.normalizeName(itemName) and newName ~= "" then
                         local dirPath = itemPath:match("(.*/)") or ""
                         local newPath = dirPath .. newName
-                        utils.showLoading("Renaming & Saving file...")
                         local jsonDelete = '{"message":"Renaming file","sha":"' .. sha .. '"}'
-                        utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "DELETE", jsonDelete, function(dCode, dRes)
+                        httpRequestWithTimeout("Renaming & Saving file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "DELETE", jsonDelete, function(dCode, dRes)
                           local jsonCreate = '{"message":"Created via GitHub Manager","content":"' .. encoded .. '"}'
-                          utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(newPath), "PUT", jsonCreate, function(cCode, cRes)
+                          httpRequestWithTimeout("Saving new file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(newPath), "PUT", jsonCreate, function(cCode, cRes)
                             myReposModule.showFilesList(owner, repo, path, showMainScreen)
-                          end)
-                        end)
+                          end, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
+                        end, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
                       else
                         local json = '{"message":"Updated via GitHub Manager","content":"' .. encoded .. '","sha":"' .. sha .. '"}'
-                        utils.showLoading("Saving file...")
-                        utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "PUT", json, function(sCode, sRes)
+                        httpRequestWithTimeout("Saving file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "PUT", json, function(sCode, sRes)
                           myReposModule.showFilesList(owner, repo, path, showMainScreen)
-                        end)
+                        end, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
                       end
                     end
                   }))
@@ -199,7 +230,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                   btnCopyRaw.setText("Copy Raw URL")
                   btnCopyRaw.setOnClickListener(View.OnClickListener({
                     onClick = function()
-                      utils.copyToClipboard(downloadUrl)
+                      service.copy(downloadUrl)
                     end
                   }))
                   editLayout.addView(btnCopyRaw)
@@ -231,10 +262,9 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                       btnConfirmDel.setOnClickListener(View.OnClickListener({
                         onClick = function()
                           local jsonDelete = '{"message":"Deleted via GitHub Manager","sha":"' .. sha .. '"}'
-                          utils.showLoading("Deleting file...")
-                          utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "DELETE", jsonDelete, function(dCode, dRes)
+                          httpRequestWithTimeout("Deleting file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemPath), "DELETE", jsonDelete, function(dCode, dRes)
                             myReposModule.showFilesList(owner, repo, path, showMainScreen)
-                          end)
+                          end, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
                         end
                       }))
                       confLayout.addView(btnConfirmDel)
@@ -268,7 +298,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                   utils.enableBackKey(editRoot, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
                   utils.setScreen(editRoot)
                 end
-              end)
+              end, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
             end
           end
         }))
@@ -296,7 +326,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
     root.addView(scroll)
     utils.enableBackKey(root, function() myReposModule.showRepoMenu(owner, repo, nil, showMainScreen) end)
     utils.setScreen(root)
-  end)
+  end, function() myReposModule.showRepoMenu(owner, repo, nil, showMainScreen) end)
 end
 
 function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
@@ -306,8 +336,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
   end
 
   if isPrivate == nil then
-    utils.showLoading("Loading repo info...")
-    utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "GET", nil, function(code, res)
+    httpRequestWithTimeout("Loading repo info...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "GET", nil, function(code, res)
       local fetchedPrivate = false
       if code == 200 then
         pcall(function()
@@ -316,7 +345,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
         end)
       end
       myReposModule.showRepoMenu(owner, repo, fetchedPrivate, showMainScreen)
-    end)
+    end, function() showMainScreen() end)
     return
   end
 
@@ -343,7 +372,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
   btnCopyRepoUrl.setOnClickListener(View.OnClickListener({
     onClick = function()
       local repoUrl = "https://github.com/" .. owner .. "/" .. repo
-      utils.copyToClipboard(repoUrl)
+      service.copy(repoUrl)
     end
   }))
   layout.addView(btnCopyRepoUrl)
@@ -353,7 +382,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
   btnCopyZipUrl.setOnClickListener(View.OnClickListener({
     onClick = function()
       local zipUrl = "https://github.com/" .. owner .. "/" .. repo .. "/archive/refs/heads/main.zip"
-      utils.copyToClipboard(zipUrl)
+      service.copy(zipUrl)
     end
   }))
   layout.addView(btnCopyZipUrl)
@@ -408,8 +437,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
           local fileName = tostring(inputName.getText())
           local fileContent = tostring(inputContent.getText())
           if fileName ~= "" then
-            utils.showLoading("Checking file...")
-            utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/", "GET", nil, function(code, res)
+            httpRequestWithTimeout("Checking file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/", "GET", nil, function(code, res)
               local found = false
               local existingFileName = ""
               local fileSha = ""
@@ -437,8 +465,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
                 else
                   json = '{"message":"Created via GitHub Manager","content":"' .. encoded .. '"}'
                 end
-                utils.showLoading("Saving file...")
-                utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(shaToUse and shaToUse ~= "" and existingFileName or fileName), "PUT", json, function(cCode, cRes)
+                httpRequestWithTimeout("Saving file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(shaToUse and shaToUse ~= "" and existingFileName or fileName), "PUT", json, function(cCode, cRes)
                   if cCode == 201 or cCode == 200 then
                     local succRoot = LinearLayout(service)
                     succRoot.setOrientation(LinearLayout.VERTICAL)
@@ -471,7 +498,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
                   else
                     myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
                   end
-                end)
+                end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
               end
 
               if found then
@@ -515,7 +542,7 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
               else
                 doSaveFile(nil)
               end
-            end)
+            end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
           end
         end
       }))
@@ -578,14 +605,13 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
           local newRName = tostring(inputNewRepoName.getText())
           if newRName ~= "" and utils.normalizeName(newRName) ~= utils.normalizeName(repo) then
             local jsonRename = '{"name":"' .. newRName .. '"}'
-            utils.showLoading("Renaming repository...")
-            utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonRename, function(renCode, renRes)
+            httpRequestWithTimeout("Renaming repository...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonRename, function(renCode, renRes)
               if renCode == 200 then
                 myReposModule.showRepoMenu(owner, newRName, isPrivate, showMainScreen)
               else
                 myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
               end
-            end)
+            end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
           end
         end
       }))
@@ -634,10 +660,9 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
         btnMakePublic.setText("Make Public")
         btnMakePublic.setOnClickListener(View.OnClickListener({
           onClick = function()
-            utils.showLoading("Changing to Public...")
-            utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":false}', function(pCode, pRes)
+            httpRequestWithTimeout("Changing to Public...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":false}', function(pCode, pRes)
               myReposModule.showRepoMenu(owner, repo, false, showMainScreen)
-            end)
+            end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
           end
         }))
         vLayout.addView(btnMakePublic)
@@ -646,10 +671,9 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
         btnMakePrivate.setText("Make Private")
         btnMakePrivate.setOnClickListener(View.OnClickListener({
           onClick = function()
-            utils.showLoading("Changing to Private...")
-            utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":true}', function(pCode, pRes)
+            httpRequestWithTimeout("Changing to Private...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":true}', function(pCode, pRes)
               myReposModule.showRepoMenu(owner, repo, true, showMainScreen)
-            end)
+            end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
           end
         }))
         vLayout.addView(btnMakePrivate)
@@ -696,10 +720,9 @@ function myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen)
       btnConfirmRepoDel.setText("Yes, Delete Repository")
       btnConfirmRepoDel.setOnClickListener(View.OnClickListener({
         onClick = function()
-          utils.showLoading("Deleting repository...")
-          utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "DELETE", nil, function(dCode, dRes)
+          httpRequestWithTimeout("Deleting repository...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "DELETE", nil, function(dCode, dRes)
             myReposModule.showMyRepos(showMainScreen)
-          end)
+          end, function() myReposModule.showRepoMenu(owner, repo, isPrivate, showMainScreen) end)
         end
       }))
       rConfLayout.addView(btnConfirmRepoDel)
@@ -740,8 +763,7 @@ function myReposModule.showMyRepos(showMainScreen)
     return
   end
 
-  utils.showLoading("Fetching Repositories...")
-  utils.httpRequest("https://api.github.com/user/repos?per_page=100", "GET", nil, function(code, res)
+  httpRequestWithTimeout("Fetching Repositories...", "https://api.github.com/user/repos?per_page=100", "GET", nil, function(code, res)
     if code ~= 200 then
       local errRoot = LinearLayout(service)
       errRoot.setOrientation(LinearLayout.VERTICAL)
@@ -817,7 +839,7 @@ function myReposModule.showMyRepos(showMainScreen)
     rRoot.addView(rScroll)
     utils.enableBackKey(rRoot, function() showMainScreen() end)
     utils.setScreen(rRoot)
-  end)
+  end, function() showMainScreen() end)
 end
 
 return myReposModule
