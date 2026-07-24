@@ -1,7 +1,38 @@
 local utils = require("utils")
 local tokenModule = require("token_module")
 
+local Handler = Handler or luajava.bindClass("android.os.Handler")
+local Looper = Looper or luajava.bindClass("android.os.Looper")
+local Runnable = Runnable or luajava.bindClass("java.lang.Runnable")
+local Toast = Toast or luajava.bindClass("android.os.Toast")
+
 local createRepoModule = {}
+
+local function httpRequestWithTimeout(loadingText, url, method, data, callback, showMainScreen)
+  utils.showLoading(loadingText)
+  local isCompleted = false
+  local handler = Handler(Looper.getMainLooper())
+
+  local timeoutRunnable = Runnable({
+    run = function()
+      if not isCompleted then
+        isCompleted = true
+        Toast.makeText(service, "Internet error: Request timed out", Toast.LENGTH_SHORT).show()
+        showMainScreen()
+      end
+    end
+  })
+
+  handler.postDelayed(timeoutRunnable, 30000)
+
+  utils.httpRequest(url, method, data, function(code, res)
+    if not isCompleted then
+      isCompleted = true
+      handler.removeCallbacks(timeoutRunnable)
+      callback(code, res)
+    end
+  end)
+end
 
 function createRepoModule.showCreateRepoScreen(showMainScreen)
   if utils.loadToken() == "" then
@@ -28,7 +59,7 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
 
   local btnSub = Button(service)
   btnSub.setText("Create")
-  
+
   local function updateCreateRepoState()
     local val = tostring(input.getText())
     btnSub.setEnabled(val ~= "")
@@ -45,8 +76,7 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
     onClick = function()
       local rName = tostring(input.getText())
       if rName ~= "" then
-        utils.showLoading("Checking repository...")
-        utils.httpRequest("https://api.github.com/user/repos?per_page=100", "GET", nil, function(code, res)
+        httpRequestWithTimeout("Checking repository...", "https://api.github.com/user/repos?per_page=100", "GET", nil, function(code, res)
           if code == 200 then
             local found = false
             local existingName = ""
@@ -66,9 +96,8 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
             end)
 
             local function doCreateRepo(isPrivate)
-              utils.showLoading("Creating repository...")
               local json = '{"name":"' .. rName .. '","private":' .. tostring(isPrivate) .. '}'
-              utils.httpRequest("https://api.github.com/user/repos", "POST", json, function(cCode, cRes)
+              httpRequestWithTimeout("Creating repository...", "https://api.github.com/user/repos", "POST", json, function(cCode, cRes)
                 if cCode == 201 or cCode == 200 then
                   local succRoot = LinearLayout(service)
                   succRoot.setOrientation(LinearLayout.VERTICAL)
@@ -101,7 +130,7 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
                 else
                   showMainScreen()
                 end
-              end)
+              end, showMainScreen)
             end
 
             local function showVisibilityOption(onSelected)
@@ -173,10 +202,9 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
               btnYes.setOnClickListener(View.OnClickListener({
                 onClick = function()
                   showVisibilityOption(function(isPrivate)
-                    utils.showLoading("Overwriting repository...")
-                    utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(ownerName) .. "/" .. utils.urlEncode(existingName), "DELETE", nil, function(dCode, dRes)
+                    httpRequestWithTimeout("Overwriting repository...", "https://api.github.com/repos/" .. utils.urlEncode(ownerName) .. "/" .. utils.urlEncode(existingName), "DELETE", nil, function(dCode, dRes)
                       doCreateRepo(isPrivate)
-                    end)
+                    end, showMainScreen)
                   end)
                 end
               }))
@@ -201,7 +229,7 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
           else
             showMainScreen()
           end
-        end)
+        end, showMainScreen)
       end
     end
   }))
