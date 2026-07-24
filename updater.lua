@@ -285,40 +285,6 @@ local function updateVersionInFile(newVersion)
   end
 end
 
-function updater.showNoUpdateDialog(onlineVersion, localVersion, onDismiss)
-  local root = LinearLayout(service)
-  root.setOrientation(LinearLayout.VERTICAL)
-  root.setBackgroundColor(Color.BLACK)
-
-  local scroll = ScrollView(service)
-  local layout = LinearLayout(service)
-  layout.setOrientation(LinearLayout.VERTICAL)
-  layout.setPadding(20, 20, 20, 20)
-
-  local tvMsg = TextView(service)
-  tvMsg.setText("No Update Available!\n\nLocal Version: " .. tostring(localVersion) .. "\nOnline Version: " .. tostring(onlineVersion))
-  tvMsg.setTextSize(18)
-  tvMsg.setTextColor(Color.GREEN)
-  tvMsg.setPadding(0, 20, 0, 20)
-  layout.addView(tvMsg)
-
-  local btnClose = Button(service)
-  btnClose.setText("Close")
-  btnClose.setOnClickListener(makeOnClickListener(function()
-    onDismiss()
-  end))
-  layout.addView(btnClose)
-
-  scroll.addView(layout)
-  root.addView(scroll)
-
-  utils.enableBackKey(root, function()
-    onDismiss()
-  end)
-
-  utils.setScreen(root)
-end
-
 function updater.showErrorDialog(msg, onDismiss)
   local root = LinearLayout(service)
   root.setOrientation(LinearLayout.VERTICAL)
@@ -534,7 +500,10 @@ function updater.checkUpdate(onFinished)
     
     if onlineVersion == updater.config.CURRENT_VERSION then
       runOnUI(function()
-        updater.showNoUpdateDialog(onlineVersion, updater.config.CURRENT_VERSION, onFinished)
+        showToast("No update available.")
+        if onFinished then
+          onFinished()
+        end
       end)
     else
       local whatsNewText = fetchUrlText(updater.config.WHATSNEW_URL) or ""
