@@ -342,6 +342,8 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
   utils.enableBackKey(root, function()
     if isDownloading then
       Toast.makeText(service, "Downloading in progress...", Toast.LENGTH_SHORT).show()
+    else
+      onDismiss()
     end
   end)
 
@@ -395,6 +397,7 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
 
   local btnCancel = Button(service)
   btnCancel.setText("Cancel")
+  btnCancel.setVisibility(View.GONE)
 
   btnUpdate.setOnClickListener(makeOnClickListener(function()
     if isDownloading then return end
@@ -402,6 +405,7 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
     btnDismiss.setEnabled(false)
     btnUpdate.setText("Downloading...")
     btnUpdate.setEnabled(false)
+    btnCancel.setVisibility(View.VISIBLE)
 
     runInBackground(function()
       local tempZip = File(service.getCacheDir(), "update_temp.zip")
@@ -413,6 +417,7 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
           btnDismiss.setEnabled(true)
           btnUpdate.setText("Update Now")
           btnUpdate.setEnabled(true)
+          btnCancel.setVisibility(View.GONE)
           Toast.makeText(service, "Download failed! Try again.", Toast.LENGTH_SHORT).show()
         end)
         return
@@ -443,9 +448,8 @@ function updater.showUpdateDialog(onlineVersion, whatsNewText, onDismiss)
       btnDismiss.setEnabled(true)
       btnUpdate.setText("Update Now")
       btnUpdate.setEnabled(true)
+      btnCancel.setVisibility(View.GONE)
       Toast.makeText(service, "Update canceled.", Toast.LENGTH_SHORT).show()
-    else
-      onDismiss()
     end
   end))
 
@@ -478,16 +482,18 @@ function updater.showRestartDialog()
   btnRestart.setText("Restart Extension")
   btnRestart.setOnClickListener(makeOnClickListener(function()
     for k, _ in pairs(package.loaded) do
-      if k:find("updater") or k:find("utils") or k:find("main") then
+      if k ~= "string" and k ~= "table" and k ~= "math" and k ~= "coroutine" and k ~= "package" and k ~= "io" and k ~= "os" and k ~= "debug" and k ~= "luajava" then
         package.loaded[k] = nil
       end
     end
-    utils.closeExtension()
+    pcall(function()
+      utils.closeExtension()
+    end)
     mainHandler.postDelayed(makeRunnable(function()
       pcall(function()
         dofile(updater.config.TARGET_PATH .. updater.config.MAIN_FILE)
       end)
-    end), 500)
+    end), 300)
   end))
   layout.addView(btnRestart)
 
@@ -495,7 +501,9 @@ function updater.showRestartDialog()
   root.addView(scroll)
 
   utils.enableBackKey(root, function()
-    utils.closeExtension()
+    pcall(function()
+      utils.closeExtension()
+    end)
   end)
 
   utils.setScreen(root)
