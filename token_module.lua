@@ -107,8 +107,49 @@ function tokenModule.showTokenEditScreen(showMainScreen)
         return
       end
 
+      local handler = Handler(Looper.getMainLooper())
+      local isTimeout = false
+      local timeoutRunnable = Runnable({
+        run = function()
+          isTimeout = true
+          local errRoot = LinearLayout(service)
+          errRoot.setOrientation(LinearLayout.VERTICAL)
+          errRoot.setBackgroundColor(Color.BLACK)
+          errRoot.setPadding(20, 20, 20, 20)
+
+          local errScroll = ScrollView(service)
+          local errLayout = LinearLayout(service)
+          errLayout.setOrientation(LinearLayout.VERTICAL)
+
+          errLayout.addView(utils.createHeader("Connection Error"))
+          local errInfo = TextView(service)
+          errInfo.setText("Connection timed out after 30 seconds. Please check your internet connection and try again.")
+          errInfo.setTextColor(Color.YELLOW)
+          errInfo.setTextSize(16)
+          errInfo.setPadding(20, 20, 20, 20)
+          errLayout.addView(errInfo)
+
+          local btnErrBack = Button(service)
+          btnErrBack.setText("Try Again")
+          btnErrBack.setOnClickListener(View.OnClickListener({
+            onClick = function() tokenModule.showTokenEditScreen(showMainScreen) end
+          }))
+          errLayout.addView(btnErrBack)
+
+          errScroll.addView(errLayout)
+          errRoot.addView(errScroll)
+          utils.enableBackKey(errRoot, function() tokenModule.showTokenEditScreen(showMainScreen) end)
+          utils.setScreen(errRoot)
+        end
+      })
+
       utils.showLoading("Verifying Token...")
+      handler.postDelayed(timeoutRunnable, 30000)
+
       utils.httpRequestWithToken("https://api.github.com/user", "GET", nil, cleanVal, function(vCode, vRes)
+        if isTimeout then return end
+        handler.removeCallbacks(timeoutRunnable)
+
         if vCode == 200 then
           if utils.saveToken(cleanVal) then
             local uName = ""
