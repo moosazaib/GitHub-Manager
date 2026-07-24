@@ -1,1 +1,28 @@
-hi
+🎉 Official Grand Launch - GitHub Manager v1.0
+--------------------------------------------------
+🚀 Designed & Engineered with Mastery by Moosa Zaib
+
+✨ WHAT'S NEW & KEY FEATURES:
+
+🔑 Seamless Personal Access Token Integration:
+Securely link your GitHub account with instant token verification and saved credentials.
+
+📂 Complete Repository Management:
+Effortlessly view, create (Public or Private), rename, and delete repositories on the fly.
+
+📄 Advanced File Explorer & Live Editor:
+Browse folders, view and edit files, or upload brand-new content directly from your device.
+
+👁️ Instant Visibility Toggle:
+Check your repository status and switch between Public and Private with a single tap.
+
+🔄 Smart Automatic Update System:
+Launches automatic background update checks on startup to keep your app always up to date.
+
+⚡ Bulletproof Memory & Process Handling:
+Enhanced stability with complete memory cleanup on restart to prevent overlapping windows.
+
+📱 Screen Reader & Accessibility Optimized:
+Smooth navigation layout engineered for absolute speed, clarity, and convenience.
+
+💡 Thank you for using GitHub Manager! Enjoy complete control over your GitHub workflow.
