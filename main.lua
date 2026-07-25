@@ -1,7 +1,6 @@
 local utils = require("utils")
 local tokenModule = require("token_module")
 local myReposModule = require("my_repos")
-local createRepoModule = require("create_repo")
 local aboutModule = require("about_module")
 local updater = require("updater")
 
@@ -34,15 +33,6 @@ local function showMainScreen()
     end
   }))
   layout.addView(btnMyRepos)
-
-  local btnCreateRepo = Button(service)
-  btnCreateRepo.setText("Create New Repository")
-  btnCreateRepo.setOnClickListener(View.OnClickListener({
-    onClick = function()
-      createRepoModule.showCreateRepoScreen(showMainScreen)
-    end
-  }))
-  layout.addView(btnCreateRepo)
 
   local btnAbout = Button(service)
   btnAbout.setText("About & User Guide")
