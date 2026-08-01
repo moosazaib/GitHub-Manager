@@ -1,1 +1,2 @@
-UI design change
+🛠️ Navigation & UI Fixes:
+- Fixed Back Navigation on File Deletion: Resolved an issue where pressing 'Cancel' or using the system Back key on the Delete Confirmation screen skipped two steps back to the file list. It now correctly returns you to the File Editor screen.
