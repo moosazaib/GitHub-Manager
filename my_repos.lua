@@ -250,14 +250,18 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                         btnCancelDel.setText("Cancel")
                         btnCancelDel.setOnClickListener(View.OnClickListener({
                           onClick = function()
-                            myReposModule.showFilesList(owner, repo, path, showMainScreen)
+                            utils.enableBackKey(editRoot, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
+                            utils.setScreen(editRoot)
                           end
                         }))
                         confLayout.addView(btnCancelDel)
 
                         confScroll.addView(confLayout)
                         confRoot.addView(confScroll)
-                        utils.enableBackKey(confRoot, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
+                        utils.enableBackKey(confRoot, function()
+                          utils.enableBackKey(editRoot, function() myReposModule.showFilesList(owner, repo, path, showMainScreen) end)
+                          utils.setScreen(editRoot)
+                        end)
                         utils.setScreen(confRoot)
                       end
                     }))
