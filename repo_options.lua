@@ -7,6 +7,16 @@ local Looper = Looper or luajava.bindClass("android.os.Looper")
 local Runnable = Runnable or luajava.bindClass("java.lang.Runnable")
 local Toast = Toast or luajava.bindClass("android.os.Toast")
 
+local File = luajava.bindClass("java.io.File")
+local FileInputStream = luajava.bindClass("java.io.FileInputStream")
+local ByteArrayOutputStream = luajava.bindClass("java.io.ByteArrayOutputStream")
+local Environment = luajava.bindClass("android.os.Environment")
+local Byte = luajava.bindClass("java.lang.Byte")
+local Array = luajava.bindClass("java.lang.reflect.Array")
+local Thread = luajava.bindClass("java.lang.Thread")
+local CheckBox = luajava.bindClass("android.widget.CheckBox")
+local CompoundButton = luajava.bindClass("android.widget.CompoundButton")
+
 local repoOptionsModule = {}
 
 local function httpRequestWithTimeout(loadingText, url, method, data, callback, fallbackScreen)
@@ -90,9 +100,9 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
   }))
   layout.addView(btnCopyZipUrl)
 
-  local btnUpload = Button(service)
-  btnUpload.setText("Upload New File")
-  btnUpload.setOnClickListener(View.OnClickListener({
+  local btnCreateTextFile = Button(service)
+  btnCreateTextFile.setText("Create Text File")
+  btnCreateTextFile.setOnClickListener(View.OnClickListener({
     onClick = function()
       local uRoot = LinearLayout(service)
       uRoot.setOrientation(LinearLayout.VERTICAL)
@@ -103,7 +113,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       local uLayout = LinearLayout(service)
       uLayout.setOrientation(LinearLayout.VERTICAL)
 
-      uLayout.addView(utils.createHeader("New File in " .. repo))
+      uLayout.addView(utils.createHeader("Create Text File in " .. repo))
 
       local inputName = EditText(service)
       inputName.setHint("File Name e.g. test.txt")
@@ -264,7 +274,415 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       utils.setScreen(uRoot)
     end
   }))
-  layout.addView(btnUpload)
+  layout.addView(btnCreateTextFile)
+
+  local function processUploadQueue(queue, index)
+    if index > #queue then
+      local succRoot = LinearLayout(service)
+      succRoot.setOrientation(LinearLayout.VERTICAL)
+      succRoot.setBackgroundColor(Color.BLACK)
+      succRoot.setPadding(20, 20, 20, 20)
+
+      local succScroll = ScrollView(service)
+      local succLayout = LinearLayout(service)
+      succLayout.setOrientation(LinearLayout.VERTICAL)
+
+      succLayout.addView(utils.createHeader("Success"))
+      local info = TextView(service)
+      info.setText("All selected files processed successfully!")
+      info.setTextColor(Color.GREEN)
+      info.setTextSize(16)
+      info.setPadding(20, 20, 20, 20)
+      succLayout.addView(info)
+
+      local btnOk = Button(service)
+      btnOk.setText("OK")
+      btnOk.setOnClickListener(View.OnClickListener({
+        onClick = function() onBackToRepo() end
+      }))
+      succLayout.addView(btnOk)
+
+      succScroll.addView(succLayout)
+      succRoot.addView(succScroll)
+      utils.enableBackKey(succRoot, function() onBackToRepo() end)
+      utils.setScreen(succRoot)
+      return
+    end
+
+    local currentFile = queue[index]
+    local fileName = currentFile.getName()
+
+    httpRequestWithTimeout("Checking file " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/", "GET", nil, function(code, res)
+      local found = false
+      local existingFileName = ""
+      local fileSha = ""
+      if code == 200 then
+        pcall(function()
+          local arr = JSONArray(res)
+          for i = 0, arr.length() - 1 do
+            local item = arr.getJSONObject(i)
+            local name = item.getString("name")
+            if utils.normalizeName(name) == utils.normalizeName(fileName) then
+              found = true
+              existingFileName = name
+              fileSha = item.getString("sha")
+              break
+            end
+          end
+        end)
+      end
+
+      local function doUpload(shaToUse)
+        utils.showLoading("Reading and encoding " .. index .. "/" .. #queue .. "...")
+        Thread(Runnable({
+          run = function()
+            local encoded = ""
+            pcall(function()
+              local fis = FileInputStream(currentFile)
+              local baos = ByteArrayOutputStream()
+              local buffer = Array.newInstance(Byte.TYPE, 65536)
+              local len = fis.read(buffer)
+              while len > 0 do
+                baos.write(buffer, 0, len)
+                len = fis.read(buffer)
+              end
+              fis.close()
+              encoded = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+            end)
+
+            Handler(Looper.getMainLooper()).post(Runnable({
+              run = function()
+                if encoded == "" then
+                  if service and service.speak then
+                    service.speak("Failed to read file " .. fileName)
+                  end
+                  Toast.makeText(service, "Failed to read file: " .. fileName, Toast.LENGTH_SHORT).show()
+                  processUploadQueue(queue, index + 1)
+                  return
+                end
+                local json = ""
+                if shaToUse and shaToUse ~= "" then
+                  json = '{"message":"Updated via GitHub Manager","content":"' .. encoded .. '","sha":"' .. shaToUse .. '"}'
+                else
+                  json = '{"message":"Created via GitHub Manager","content":"' .. encoded .. '"}'
+                end
+                httpRequestWithTimeout("Uploading " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(shaToUse and shaToUse ~= "" and existingFileName or fileName), "PUT", json, function(cCode, cRes)
+                  processUploadQueue(queue, index + 1)
+                end, function() processUploadQueue(queue, index + 1) end)
+              end
+            }))
+          end
+        })).start()
+      end
+
+      if found then
+        local confRoot = LinearLayout(service)
+        confRoot.setOrientation(LinearLayout.VERTICAL)
+        confRoot.setBackgroundColor(Color.BLACK)
+        confRoot.setPadding(20, 20, 20, 20)
+
+        local confScroll = ScrollView(service)
+        local confLayout = LinearLayout(service)
+        confLayout.setOrientation(LinearLayout.VERTICAL)
+
+        confLayout.addView(utils.createHeader("File Exists (" .. index .. "/" .. #queue .. ")"))
+        local info = TextView(service)
+        info.setText("File '" .. existingFileName .. "' already exists. Do you want to overwrite it or remove it from list?")
+        info.setTextColor(Color.YELLOW)
+        info.setTextSize(16)
+        info.setPadding(20, 20, 20, 20)
+        confLayout.addView(info)
+
+        local btnYes = Button(service)
+        btnYes.setText("Yes, Overwrite")
+        btnYes.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            doUpload(fileSha)
+          end
+        }))
+        confLayout.addView(btnYes)
+
+        local btnRemove = Button(service)
+        btnRemove.setText("Remove from list")
+        btnRemove.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            processUploadQueue(queue, index + 1)
+          end
+        }))
+        confLayout.addView(btnRemove)
+
+        confScroll.addView(confLayout)
+        confRoot.addView(confScroll)
+        utils.enableBackKey(confRoot, function() processUploadQueue(queue, index + 1) end)
+        utils.setScreen(confRoot)
+      else
+        doUpload(nil)
+      end
+    end, function() processUploadQueue(queue, index + 1) end)
+  end
+
+  local function openFilePicker(path)
+    local currentPath = path
+    if not currentPath or currentPath == "" then
+      pcall(function()
+        local prefs = service.getSharedPreferences("github_manager_prefs", 0)
+        local saved = prefs.getString("last_upload_path", "")
+        if saved and saved ~= "" then
+          local checkFile = File(saved)
+          if checkFile.exists() and checkFile.isDirectory() and checkFile.canRead() then
+            currentPath = saved
+          end
+        end
+      end)
+    end
+
+    if not currentPath or currentPath == "" then
+      pcall(function()
+        currentPath = Environment.getExternalStorageDirectory().getAbsolutePath()
+      end)
+      if not currentPath or currentPath == "" then
+        currentPath = "/sdcard"
+      end
+    end
+
+    local pRoot = LinearLayout(service)
+    pRoot.setOrientation(LinearLayout.VERTICAL)
+    pRoot.setBackgroundColor(Color.BLACK)
+    pRoot.setPadding(20, 20, 20, 20)
+
+    local pScroll = ScrollView(service)
+    local pLayout = LinearLayout(service)
+    pLayout.setOrientation(LinearLayout.VERTICAL)
+
+    pLayout.addView(utils.createHeader("Select Files"))
+
+    local rootStoragePath = ""
+    pcall(function()
+      rootStoragePath = Environment.getExternalStorageDirectory().getAbsolutePath()
+    end)
+    local dirDisplayName = ""
+    if currentPath == rootStoragePath or currentPath == "/sdcard" or currentPath == "/storage/emulated/0" then
+      dirDisplayName = "Internal Storage"
+    else
+      local fCurr = File(currentPath)
+      dirDisplayName = fCurr.getName()
+      if not dirDisplayName or dirDisplayName == "" then
+        dirDisplayName = currentPath
+      end
+    end
+
+    local pathInfo = TextView(service)
+    pathInfo.setText(dirDisplayName)
+    pathInfo.setTextColor(Color.YELLOW)
+    pathInfo.setPadding(10, 10, 10, 10)
+    pLayout.addView(pathInfo)
+
+    local fDir = File(currentPath)
+    local parentFile = fDir.getParentFile()
+
+    local function goBackDir()
+      if parentFile and parentFile.exists() and parentFile.canRead() and parentFile.getAbsolutePath() ~= "/" then
+        openFilePicker(parentFile.getAbsolutePath())
+      else
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+      end
+    end
+
+    local btnBackOpt = Button(service)
+    btnBackOpt.setText("Back to Options")
+    btnBackOpt.setOnClickListener(View.OnClickListener({
+      onClick = function()
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+      end
+    }))
+    pLayout.addView(btnBackOpt)
+
+    local btnUp = Button(service)
+    btnUp.setText("Back to Previous Directory")
+    btnUp.setOnClickListener(View.OnClickListener({
+      onClick = function()
+        goBackDir()
+      end
+    }))
+    pLayout.addView(btnUp)
+
+    local selectedFilesMap = {}
+    local validCheckBoxes = {}
+
+    local btnSelectAll = Button(service)
+    btnSelectAll.setText("Select All Eligible Files")
+    btnSelectAll.setVisibility(View.GONE)
+    pLayout.addView(btnSelectAll)
+
+    local btnUploadSelected = Button(service)
+    btnUploadSelected.setText("Upload Selected Files")
+    btnUploadSelected.setVisibility(View.GONE)
+    pLayout.addView(btnUploadSelected)
+
+    local isProgrammaticCheck = false
+
+    local function updateUIState()
+      local selectedCount = 0
+      for _ in pairs(selectedFilesMap) do selectedCount = selectedCount + 1 end
+
+      if selectedCount > 0 then
+        btnUploadSelected.setText("Upload Selected Files (" .. selectedCount .. ")")
+        btnUploadSelected.setVisibility(View.VISIBLE)
+      else
+        btnUploadSelected.setVisibility(View.GONE)
+      end
+
+      if #validCheckBoxes > 0 then
+        btnSelectAll.setVisibility(View.VISIBLE)
+        if selectedCount == #validCheckBoxes then
+          btnSelectAll.setText("Deselect All Eligible Files")
+        else
+          btnSelectAll.setText("Select All Eligible Files")
+        end
+      else
+        btnSelectAll.setVisibility(View.GONE)
+      end
+    end
+
+    btnSelectAll.setOnClickListener(View.OnClickListener({
+      onClick = function()
+        local selectedCount = 0
+        for _ in pairs(selectedFilesMap) do selectedCount = selectedCount + 1 end
+
+        local targetState = (selectedCount < #validCheckBoxes)
+        isProgrammaticCheck = true
+        for _, item in ipairs(validCheckBoxes) do
+          item.cb.setChecked(targetState)
+          if targetState then
+            selectedFilesMap[item.file.getAbsolutePath()] = item.file
+          else
+            selectedFilesMap[item.file.getAbsolutePath()] = nil
+          end
+        end
+        isProgrammaticCheck = false
+        updateUIState()
+      end
+    }))
+
+    btnUploadSelected.setOnClickListener(View.OnClickListener({
+      onClick = function()
+        pcall(function()
+          local prefs = service.getSharedPreferences("github_manager_prefs", 0)
+          prefs.edit().putString("last_upload_path", currentPath).apply()
+        end)
+        local queue = {}
+        for _, f in pairs(selectedFilesMap) do
+          table.insert(queue, f)
+        end
+        table.sort(queue, function(a, b) return string.lower(a.getName()) < string.lower(b.getName()) end)
+        if #queue > 0 then
+          processUploadQueue(queue, 1)
+        end
+      end
+    }))
+
+    local filesList = fDir.listFiles()
+    if filesList then
+      local dirs = {}
+      local files = {}
+      local len = Array.getLength(filesList)
+      for i = 0, len - 1 do
+        local item = Array.get(filesList, i)
+        if item and item.canRead() and not item.isHidden() then
+          if item.isDirectory() then
+            table.insert(dirs, item)
+          else
+            table.insert(files, item)
+          end
+        end
+      end
+
+      table.sort(dirs, function(a, b) return string.lower(a.getName()) < string.lower(b.getName()) end)
+      table.sort(files, function(a, b) return string.lower(a.getName()) < string.lower(b.getName()) end)
+
+      for _, dItem in ipairs(dirs) do
+        local b = Button(service)
+        b.setText("[Folder] " .. dItem.getName())
+        b.setTextColor(Color.CYAN)
+        b.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            openFilePicker(dItem.getAbsolutePath())
+          end
+        }))
+        pLayout.addView(b)
+      end
+
+      for _, fItem in ipairs(files) do
+        local cb = CheckBox(service)
+        local bytes = fItem.length()
+        local sizeStr = ""
+        if bytes < (1024 * 1024) then
+          local szKb = math.floor(bytes / 1024)
+          sizeStr = szKb .. " KB"
+        else
+          local szMb = bytes / (1024 * 1024)
+          sizeStr = string.format("%.2f MB", szMb)
+        end
+
+        cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ")")
+        cb.setTextColor(Color.WHITE)
+
+        if bytes > (50 * 1024 * 1024) then
+          cb.setEnabled(false)
+          cb.setTextColor(Color.GRAY)
+          cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ") - Exceeds 50MB")
+          cb.setOnClickListener(View.OnClickListener({
+            onClick = function()
+              if service and service.speak then
+                service.speak("File size exceeds 50MB limit")
+              else
+                Toast.makeText(service, "File size exceeds 50MB limit!", Toast.LENGTH_SHORT).show()
+              end
+            end
+          }))
+        else
+          table.insert(validCheckBoxes, { cb = cb, file = fItem })
+          cb.setOnCheckedChangeListener(CompoundButton.OnCheckedChangeListener({
+            onCheckedChanged = function(buttonView, isChecked)
+              if not isProgrammaticCheck then
+                if isChecked then
+                  selectedFilesMap[fItem.getAbsolutePath()] = fItem
+                else
+                  selectedFilesMap[fItem.getAbsolutePath()] = nil
+                end
+                updateUIState()
+              end
+            end
+          }))
+        end
+        pLayout.addView(cb)
+      end
+
+      updateUIState()
+    else
+      local emptyTv = TextView(service)
+      emptyTv.setText("Folder is empty or unreadable.")
+      emptyTv.setTextColor(Color.GRAY)
+      emptyTv.setPadding(20, 20, 20, 20)
+      pLayout.addView(emptyTv)
+    end
+
+    pScroll.addView(pLayout)
+    pRoot.addView(pScroll)
+    utils.enableBackKey(pRoot, function()
+      goBackDir()
+    end)
+    utils.setScreen(pRoot)
+  end
+
+  local btnUploadStorageFile = Button(service)
+  btnUploadStorageFile.setText("Upload File From Phone Storage")
+  btnUploadStorageFile.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      openFilePicker(nil)
+    end
+  }))
+  layout.addView(btnUploadStorageFile)
 
   local btnRenameRepo = Button(service)
   btnRenameRepo.setText("Rename Repository")
