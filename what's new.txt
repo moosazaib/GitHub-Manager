@@ -1,2 +1,3 @@
-🛠️ Navigation & UI Fixes:
-- Fixed Back Navigation on File Deletion: Resolved an issue where pressing 'Cancel' or using the system Back key on the Delete Confirmation screen skipped two steps back to the file list. It now correctly returns you to the File Editor screen.
+• Added 'Upload File From Phone Storage' option inside 'More Options' (accessible when opening any repository's file list). Easily browse internal storage and upload single or multiple files with an automatic 50MB size check and overwrite protection!
+• Added Multi-Selection Mode in both Repositories and File lists! Simply long-press any item to select multiple repositories, folders, or files and perform quick bulk deletions in one go.
+Do you want to know how to use this extension? If so, visit the About page from the main menu.
