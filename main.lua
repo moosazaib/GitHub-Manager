@@ -1,6 +1,7 @@
 local utils = require("utils")
 local tokenModule = require("token_module")
 local myReposModule = require("my_repos")
+local profileModule = require("profile_module")
 local aboutModule = require("about_module")
 local updater = require("updater")
 
@@ -24,6 +25,15 @@ local function showMainScreen()
     end
   }))
   layout.addView(btnSetToken)
+
+  local btnProfile = Button(service)
+  btnProfile.setText("My Profile")
+  btnProfile.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      profileModule.showProfileScreen(showMainScreen)
+    end
+  }))
+  layout.addView(btnProfile)
 
   local btnMyRepos = Button(service)
   btnMyRepos.setText("My Repositories")
