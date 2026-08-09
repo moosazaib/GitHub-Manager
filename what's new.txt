@@ -1,3 +1,4 @@
-• Added 'Upload File From Phone Storage' option inside 'More Options' (accessible when opening any repository's file list). Easily browse internal storage and upload single or multiple files with an automatic 50MB size check and overwrite protection!
-• Added Multi-Selection Mode in both Repositories and File lists! Simply long-press any item to select multiple repositories, folders, or files and perform quick bulk deletions in one go.
+• Introduced all-new 'My Profile' section to view full account details (Repos, Gists, Followers, Plan, Creation Date), edit profile info (Name, Bio, Location), and manage Email visibility.
+• Updated 'About & User Guide' with instructions for the new Profile features.
+• Performance enhancements and underlying code optimizations for a smoother experience.
 Do you want to know how to use this extension? If so, visit the About page from the main menu.
