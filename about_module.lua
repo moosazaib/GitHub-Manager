@@ -12,6 +12,13 @@ function aboutModule.showAboutScreen(showMainScreen)
   local layout = LinearLayout(service)
   layout.setOrientation(LinearLayout.VERTICAL)
 
+  local btnBack = Button(service)
+  btnBack.setText("Back to Main Menu")
+  btnBack.setOnClickListener(View.OnClickListener({
+    onClick = function() showMainScreen() end
+  }))
+  layout.addView(btnBack)
+
   layout.addView(utils.createHeader("About & User Guide"))
 
   local infoCreator = TextView(service)
@@ -118,13 +125,6 @@ function aboutModule.showAboutScreen(showMainScreen)
   step11.setTextSize(15)
   step11.setPadding(20, 10, 20, 20)
   layout.addView(step11)
-
-  local btnBack = Button(service)
-  btnBack.setText("Back to Main Menu")
-  btnBack.setOnClickListener(View.OnClickListener({
-    onClick = function() showMainScreen() end
-  }))
-  layout.addView(btnBack)
 
   scroll.addView(layout)
   root.addView(scroll)
