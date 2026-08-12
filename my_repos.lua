@@ -115,6 +115,36 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
       local layout = LinearLayout(service)
       layout.setOrientation(LinearLayout.VERTICAL)
 
+      local btnBack = Button(service)
+      if path and path ~= "" then
+        btnBack.setText("Back to Previous Folder")
+        btnBack.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            if isSelectionMode then
+              isSelectionMode = false
+              selectedMap = {}
+              renderScreen()
+            else
+              myReposModule.showFilesList(owner, repo, parentPath, showMainScreen)
+            end
+          end
+        }))
+      else
+        btnBack.setText("Back to All Repositories")
+        btnBack.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            if isSelectionMode then
+              isSelectionMode = false
+              selectedMap = {}
+              renderScreen()
+            else
+              myReposModule.showMyRepos(showMainScreen)
+            end
+          end
+        }))
+      end
+      layout.addView(btnBack)
+
       layout.addView(utils.createHeader("Repository: " .. repo))
 
       local btnMoreOptions = Button(service)
@@ -533,36 +563,6 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
         end
       end
 
-      local btnBack = Button(service)
-      if path and path ~= "" then
-        btnBack.setText("Back to Previous Folder")
-        btnBack.setOnClickListener(View.OnClickListener({
-          onClick = function()
-            if isSelectionMode then
-              isSelectionMode = false
-              selectedMap = {}
-              renderScreen()
-            else
-              myReposModule.showFilesList(owner, repo, parentPath, showMainScreen)
-            end
-          end
-        }))
-      else
-        btnBack.setText("Back to All Repositories")
-        btnBack.setOnClickListener(View.OnClickListener({
-          onClick = function()
-            if isSelectionMode then
-              isSelectionMode = false
-              selectedMap = {}
-              renderScreen()
-            else
-              myReposModule.showMyRepos(showMainScreen)
-            end
-          end
-        }))
-      end
-      layout.addView(btnBack)
-
       scroll.addView(layout)
       root.addView(scroll)
 
@@ -608,13 +608,14 @@ function myReposModule.showMyRepos(showMainScreen)
       local errLayout = LinearLayout(service)
       errLayout.setOrientation(LinearLayout.VERTICAL)
 
-      errLayout.addView(utils.createHeader("Error " .. code .. ": Check Token"))
       local btnBack = Button(service)
       btnBack.setText("Back")
       btnBack.setOnClickListener(View.OnClickListener({
         onClick = function() showMainScreen() end
       }))
       errLayout.addView(btnBack)
+
+      errLayout.addView(utils.createHeader("Error " .. code .. ": Check Token"))
 
       errScroll.addView(errLayout)
       errRoot.addView(errScroll)
@@ -648,6 +649,21 @@ function myReposModule.showMyRepos(showMainScreen)
       local rScroll = ScrollView(service)
       local rLayout = LinearLayout(service)
       rLayout.setOrientation(LinearLayout.VERTICAL)
+
+      local btnBack = Button(service)
+      btnBack.setText("Back")
+      btnBack.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          if isSelectionMode then
+            isSelectionMode = false
+            selectedMap = {}
+            renderScreen()
+          else
+            showMainScreen()
+          end
+        end
+      }))
+      rLayout.addView(btnBack)
 
       rLayout.addView(utils.createHeader("Select Repository"))
 
@@ -835,21 +851,6 @@ function myReposModule.showMyRepos(showMainScreen)
           end
         end
       end
-
-      local btnBack = Button(service)
-      btnBack.setText("Back")
-      btnBack.setOnClickListener(View.OnClickListener({
-        onClick = function()
-          if isSelectionMode then
-            isSelectionMode = false
-            selectedMap = {}
-            renderScreen()
-          else
-            showMainScreen()
-          end
-        end
-      }))
-      rLayout.addView(btnBack)
 
       rScroll.addView(rLayout)
       rRoot.addView(rScroll)
