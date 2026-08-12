@@ -70,6 +70,13 @@ function profileModule.showProfileScreen(showMainScreen)
       local layout = LinearLayout(service)
       layout.setOrientation(LinearLayout.VERTICAL)
 
+      local btnBack = Button(service)
+      btnBack.setText("Back to Main Menu")
+      btnBack.setOnClickListener(View.OnClickListener({
+        onClick = function() showMainScreen() end
+      }))
+      layout.addView(btnBack)
+
       layout.addView(utils.createHeader("My GitHub Profile"))
 
       local txtUser = TextView(service)
@@ -174,13 +181,6 @@ function profileModule.showProfileScreen(showMainScreen)
         layout.addView(txt)
       end
 
-      local btnBack = Button(service)
-      btnBack.setText("Back to Main Menu")
-      btnBack.setOnClickListener(View.OnClickListener({
-        onClick = function() showMainScreen() end
-      }))
-      layout.addView(btnBack)
-
       scroll.addView(layout)
       root.addView(scroll)
       utils.enableBackKey(root, function() showMainScreen() end)
@@ -195,6 +195,13 @@ function profileModule.showProfileScreen(showMainScreen)
       local errLayout = LinearLayout(service)
       errLayout.setOrientation(LinearLayout.VERTICAL)
 
+      local btnErrBack = Button(service)
+      btnErrBack.setText("Back to Main Menu")
+      btnErrBack.setOnClickListener(View.OnClickListener({
+        onClick = function() showMainScreen() end
+      }))
+      errLayout.addView(btnErrBack)
+
       errLayout.addView(utils.createHeader("Error"))
 
       local errInfo = TextView(service)
@@ -203,13 +210,6 @@ function profileModule.showProfileScreen(showMainScreen)
       errInfo.setTextSize(16)
       errInfo.setPadding(20, 20, 20, 20)
       errLayout.addView(errInfo)
-
-      local btnErrBack = Button(service)
-      btnErrBack.setText("Back to Main Menu")
-      btnErrBack.setOnClickListener(View.OnClickListener({
-        onClick = function() showMainScreen() end
-      }))
-      errLayout.addView(btnErrBack)
 
       errScroll.addView(errLayout)
       errRoot.addView(errScroll)
@@ -265,6 +265,13 @@ function profileModule.showSingleFieldEditScreen(showMainScreen, fieldKey, field
           local succLayout = LinearLayout(service)
           succLayout.setOrientation(LinearLayout.VERTICAL)
 
+          local btnBackProf = Button(service)
+          btnBackProf.setText("Back to Profile")
+          btnBackProf.setOnClickListener(View.OnClickListener({
+            onClick = function() profileModule.showProfileScreen(showMainScreen) end
+          }))
+          succLayout.addView(btnBackProf)
+
           succLayout.addView(utils.createHeader("Success"))
 
           local txtMsg = TextView(service)
@@ -273,13 +280,6 @@ function profileModule.showSingleFieldEditScreen(showMainScreen, fieldKey, field
           txtMsg.setTextSize(18)
           txtMsg.setPadding(20, 10, 20, 10)
           succLayout.addView(txtMsg)
-
-          local btnBackProf = Button(service)
-          btnBackProf.setText("Back to Profile")
-          btnBackProf.setOnClickListener(View.OnClickListener({
-            onClick = function() profileModule.showProfileScreen(showMainScreen) end
-          }))
-          succLayout.addView(btnBackProf)
 
           succScroll.addView(succLayout)
           succRoot.addView(succScroll)
@@ -295,6 +295,13 @@ function profileModule.showSingleFieldEditScreen(showMainScreen, fieldKey, field
           local errLayout = LinearLayout(service)
           errLayout.setOrientation(LinearLayout.VERTICAL)
 
+          local btnErrBack = Button(service)
+          btnErrBack.setText("Back to Profile")
+          btnErrBack.setOnClickListener(View.OnClickListener({
+            onClick = function() profileModule.showProfileScreen(showMainScreen) end
+          }))
+          errLayout.addView(btnErrBack)
+
           errLayout.addView(utils.createHeader("Update Error"))
 
           local errInfo = TextView(service)
@@ -303,13 +310,6 @@ function profileModule.showSingleFieldEditScreen(showMainScreen, fieldKey, field
           errInfo.setTextSize(16)
           errInfo.setPadding(20, 20, 20, 20)
           errLayout.addView(errInfo)
-
-          local btnErrBack = Button(service)
-          btnErrBack.setText("Back to Profile")
-          btnErrBack.setOnClickListener(View.OnClickListener({
-            onClick = function() profileModule.showProfileScreen(showMainScreen) end
-          }))
-          errLayout.addView(btnErrBack)
 
           errScroll.addView(errLayout)
           errRoot.addView(errScroll)
@@ -411,6 +411,13 @@ function profileModule.showLocationEditScreen(showMainScreen, currentLoc)
           local succLayout = LinearLayout(service)
           succLayout.setOrientation(LinearLayout.VERTICAL)
 
+          local btnBackProf = Button(service)
+          btnBackProf.setText("Back to Profile")
+          btnBackProf.setOnClickListener(View.OnClickListener({
+            onClick = function() profileModule.showProfileScreen(showMainScreen) end
+          }))
+          succLayout.addView(btnBackProf)
+
           succLayout.addView(utils.createHeader("Success"))
 
           local txtMsg = TextView(service)
@@ -419,13 +426,6 @@ function profileModule.showLocationEditScreen(showMainScreen, currentLoc)
           txtMsg.setTextSize(18)
           txtMsg.setPadding(20, 10, 20, 10)
           succLayout.addView(txtMsg)
-
-          local btnBackProf = Button(service)
-          btnBackProf.setText("Back to Profile")
-          btnBackProf.setOnClickListener(View.OnClickListener({
-            onClick = function() profileModule.showProfileScreen(showMainScreen) end
-          }))
-          succLayout.addView(btnBackProf)
 
           succScroll.addView(succLayout)
           succRoot.addView(succScroll)
@@ -441,6 +441,13 @@ function profileModule.showLocationEditScreen(showMainScreen, currentLoc)
           local errLayout = LinearLayout(service)
           errLayout.setOrientation(LinearLayout.VERTICAL)
 
+          local btnErrBack = Button(service)
+          btnErrBack.setText("Back to Profile")
+          btnErrBack.setOnClickListener(View.OnClickListener({
+            onClick = function() profileModule.showProfileScreen(showMainScreen) end
+          }))
+          errLayout.addView(btnErrBack)
+
           errLayout.addView(utils.createHeader("Update Error"))
 
           local errInfo = TextView(service)
@@ -449,13 +456,6 @@ function profileModule.showLocationEditScreen(showMainScreen, currentLoc)
           errInfo.setTextSize(16)
           errInfo.setPadding(20, 20, 20, 20)
           errLayout.addView(errInfo)
-
-          local btnErrBack = Button(service)
-          btnErrBack.setText("Back to Profile")
-          btnErrBack.setOnClickListener(View.OnClickListener({
-            onClick = function() profileModule.showProfileScreen(showMainScreen) end
-          }))
-          errLayout.addView(btnErrBack)
 
           errScroll.addView(errLayout)
           errRoot.addView(errScroll)
@@ -562,6 +562,13 @@ function profileModule.showEmailVisibilityScreen(showMainScreen, currentPublicEm
             local succLayout = LinearLayout(service)
             succLayout.setOrientation(LinearLayout.VERTICAL)
 
+            local btnBackProf = Button(service)
+            btnBackProf.setText("Back to Profile")
+            btnBackProf.setOnClickListener(View.OnClickListener({
+              onClick = function() profileModule.showProfileScreen(showMainScreen) end
+            }))
+            succLayout.addView(btnBackProf)
+
             succLayout.addView(utils.createHeader("Success"))
 
             local txtMsg = TextView(service)
@@ -570,13 +577,6 @@ function profileModule.showEmailVisibilityScreen(showMainScreen, currentPublicEm
             txtMsg.setTextSize(18)
             txtMsg.setPadding(20, 10, 20, 10)
             succLayout.addView(txtMsg)
-
-            local btnBackProf = Button(service)
-            btnBackProf.setText("Back to Profile")
-            btnBackProf.setOnClickListener(View.OnClickListener({
-              onClick = function() profileModule.showProfileScreen(showMainScreen) end
-            }))
-            succLayout.addView(btnBackProf)
 
             succScroll.addView(succLayout)
             succRoot.addView(succScroll)
@@ -592,6 +592,13 @@ function profileModule.showEmailVisibilityScreen(showMainScreen, currentPublicEm
             local errLayout = LinearLayout(service)
             errLayout.setOrientation(LinearLayout.VERTICAL)
 
+            local btnErrBack = Button(service)
+            btnErrBack.setText("Back to Profile")
+            btnErrBack.setOnClickListener(View.OnClickListener({
+              onClick = function() profileModule.showProfileScreen(showMainScreen) end
+            }))
+            errLayout.addView(btnErrBack)
+
             errLayout.addView(utils.createHeader("Update Error"))
 
             local errInfo = TextView(service)
@@ -600,13 +607,6 @@ function profileModule.showEmailVisibilityScreen(showMainScreen, currentPublicEm
             errInfo.setTextSize(16)
             errInfo.setPadding(20, 20, 20, 20)
             errLayout.addView(errInfo)
-
-            local btnErrBack = Button(service)
-            btnErrBack.setText("Back to Profile")
-            btnErrBack.setOnClickListener(View.OnClickListener({
-              onClick = function() profileModule.showProfileScreen(showMainScreen) end
-            }))
-            errLayout.addView(btnErrBack)
 
             errScroll.addView(errLayout)
             errRoot.addView(errScroll)
