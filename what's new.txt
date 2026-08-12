@@ -1,4 +1,4 @@
-• Introduced all-new 'My Profile' section to view full account details (Repos, Gists, Followers, Plan, Creation Date), edit profile info (Name, Bio, Location), and manage Email visibility.
-• Updated 'About & User Guide' with instructions for the new Profile features.
-• Performance enhancements and underlying code optimizations for a smoother experience.
+✨ Enhanced UI & Smoother Navigation
+• Repositioned the 'Back' button to the top of the screen (above titles) across the About, Profile, and Repository/File List screens for faster and easier navigation.
+• Refined overall layout design to provide a cleaner look and a more comfortable user experience.
 Do you want to know how to use this extension? If so, visit the About page from the main menu.
