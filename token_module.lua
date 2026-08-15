@@ -21,12 +21,12 @@ function tokenModule.showTokenMissingScreen(showMainScreen)
   info.setPadding(20, 20, 20, 20)
   layout.addView(info)
 
-  local btnBack = Button(service)
-  btnBack.setText("Back to Main Menu")
-  btnBack.setOnClickListener(View.OnClickListener({
+  local btnOK = Button(service)
+  btnOK.setText("OK")
+  btnOK.setOnClickListener(View.OnClickListener({
     onClick = function() showMainScreen() end
   }))
-  layout.addView(btnBack)
+  layout.addView(btnOK)
 
   scroll.addView(layout)
   root.addView(scroll)
