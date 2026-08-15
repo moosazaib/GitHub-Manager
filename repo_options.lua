@@ -17,6 +17,13 @@ local Thread = luajava.bindClass("java.lang.Thread")
 local CheckBox = luajava.bindClass("android.widget.CheckBox")
 local CompoundButton = luajava.bindClass("android.widget.CompoundButton")
 
+local Uri = luajava.bindClass("android.net.Uri")
+local DownloadManager = luajava.bindClass("android.app.DownloadManager")
+local Long = luajava.bindClass("java.lang.Long")
+local AlertDialog = luajava.bindClass("android.app.AlertDialog")
+local DialogInterface = luajava.bindClass("android.content.DialogInterface")
+local WindowManager = luajava.bindClass("android.view.WindowManager")
+
 local repoOptionsModule = {}
 
 local function httpRequestWithTimeout(loadingText, url, method, data, callback, fallbackScreen)
@@ -49,6 +56,211 @@ local function httpRequestWithTimeout(loadingText, url, method, data, callback, 
   end)
 end
 
+local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
+  local isCancelled = false
+  local handler = Handler(Looper.getMainLooper())
+  local checkProgressRunnable
+  local activeCancelDialog = nil
+
+  local root = LinearLayout(service)
+  root.setOrientation(LinearLayout.VERTICAL)
+  root.setBackgroundColor(Color.BLACK)
+  root.setPadding(20, 20, 20, 20)
+
+  local scroll = ScrollView(service)
+  local layout = LinearLayout(service)
+  layout.setOrientation(LinearLayout.VERTICAL)
+
+  layout.addView(utils.createHeader("Downloading File"))
+
+  local txtFile = TextView(service)
+  txtFile.setText("File: " .. saveFileName)
+  txtFile.setTextColor(Color.WHITE)
+  txtFile.setPadding(0, 10, 0, 10)
+  layout.addView(txtFile)
+
+  local btnStatus = Button(service)
+  btnStatus.setText("Downloading... 0%")
+  btnStatus.setEnabled(false)
+  layout.addView(btnStatus)
+
+  local downloadManager = service.getSystemService(Context.DOWNLOAD_SERVICE)
+  local downloadId = -1
+
+  pcall(function()
+    local request = DownloadManager.Request(Uri.parse(urlStr))
+    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, saveFileName)
+    request.addRequestHeader("User-Agent", "GitHubManagerApp")
+
+    local savedToken = ""
+    pcall(function() savedToken = utils.loadToken() end)
+    if savedToken and savedToken:match("%S") then
+      request.addRequestHeader("Authorization", "token " .. savedToken:match("^%s*(.-)%s*$"))
+    end
+
+    downloadId = downloadManager.enqueue(request)
+  end)
+
+  if downloadId == -1 then
+    Toast.makeText(service, "Failed to start download.", Toast.LENGTH_SHORT).show()
+    onCancel()
+    return
+  end
+
+  local function doCancelAction()
+    if isCancelled then return end
+    isCancelled = true
+
+    if activeCancelDialog then
+      pcall(function() activeCancelDialog.dismiss() end)
+      activeCancelDialog = nil
+    end
+
+    pcall(function()
+      handler.removeCallbacksAndMessages(nil)
+    end)
+
+    pcall(function()
+      local longArray = Array.newInstance(Long.TYPE, 1)
+      Array.setLong(longArray, 0, Long(downloadId).longValue())
+      downloadManager.remove(longArray)
+    end)
+
+    Toast.makeText(service, "Download cancelled.", Toast.LENGTH_SHORT).show()
+    onCancel()
+  end
+
+  local function showCancelConfirmation()
+    pcall(function()
+      if activeCancelDialog then
+        activeCancelDialog.dismiss()
+        activeCancelDialog = nil
+      end
+      local builder = AlertDialog.Builder(service)
+      builder.setTitle("Cancel Download")
+      builder.setMessage("Are you sure you want to cancel the download?")
+      builder.setPositiveButton("Yes", DialogInterface.OnClickListener({
+        onClick = function(dialog, which)
+          activeCancelDialog = nil
+          pcall(function() dialog.dismiss() end)
+          doCancelAction()
+        end
+      }))
+      builder.setNegativeButton("No", DialogInterface.OnClickListener({
+        onClick = function(dialog, which)
+          activeCancelDialog = nil
+          pcall(function() dialog.dismiss() end)
+        end
+      }))
+      local dlg = builder.create()
+      pcall(function()
+        if dlg.getWindow() then
+          dlg.getWindow().setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+        end
+      end)
+      activeCancelDialog = dlg
+      dlg.show()
+    end)
+  end
+
+  local btnCancel = Button(service)
+  btnCancel.setText("Cancel Download")
+  btnCancel.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      showCancelConfirmation()
+    end
+  }))
+  layout.addView(btnCancel)
+
+  scroll.addView(layout)
+  root.addView(scroll)
+
+  utils.enableBackKey(root, function()
+    showCancelConfirmation()
+  end)
+
+  utils.setScreen(root)
+
+  local lastPercent = -1
+  checkProgressRunnable = Runnable({
+    run = function()
+      if isCancelled then return end
+      local isDone = false
+      local isSuccess = false
+
+      pcall(function()
+        local query = DownloadManager.Query()
+        local idArray = Array.newInstance(Long.TYPE, 1)
+        Array.setLong(idArray, 0, Long(downloadId).longValue())
+        query.setFilterById(idArray)
+
+        local cursor = downloadManager.query(query)
+        if cursor then
+          if cursor.moveToFirst() then
+            local bytesIdx = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            local totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            local statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+
+            if bytesIdx == -1 then bytesIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR) end
+            if totalIdx == -1 then totalIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES) end
+            if statusIdx == -1 then statusIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS) end
+
+            local bytes = cursor.getLong(bytesIdx)
+            local total = cursor.getLong(totalIdx)
+            local status = cursor.getInt(statusIdx)
+
+            local numBytes = tonumber(bytes) or 0
+            local numTotal = tonumber(total) or 0
+
+            if numTotal > 0 then
+              local percent = math.floor((numBytes * 100) / numTotal)
+              if percent > 100 then percent = 100 end
+              if percent ~= lastPercent then
+                lastPercent = percent
+                btnStatus.setText("Downloading... " .. percent .. "%")
+              end
+            end
+
+            if status == DownloadManager.STATUS_SUCCESSFUL then
+              isDone = true
+              isSuccess = true
+              btnStatus.setText("Downloading... 100%")
+            elseif status == DownloadManager.STATUS_FAILED then
+              isDone = true
+              isSuccess = false
+            end
+          end
+          cursor.close()
+        end
+      end)
+
+      if isCancelled then return end
+
+      if isDone then
+        pcall(function() handler.removeCallbacksAndMessages(nil) end)
+        if activeCancelDialog then
+          pcall(function() activeCancelDialog.dismiss() end)
+          activeCancelDialog = nil
+        end
+        if isSuccess then
+          Toast.makeText(service, "Download complete! Saved to Download folder.", Toast.LENGTH_LONG).show()
+          onSuccess()
+        else
+          Toast.makeText(service, "Download failed.", Toast.LENGTH_SHORT).show()
+          onCancel()
+        end
+      else
+        if not isCancelled then
+          handler.postDelayed(checkProgressRunnable, 200)
+        end
+      end
+    end
+  })
+
+  handler.postDelayed(checkProgressRunnable, 100)
+end
+
 function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
   if utils.loadToken() == "" then
     tokenModule.showTokenMissingScreen(showMainScreen)
@@ -79,6 +291,182 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
   layout.setOrientation(LinearLayout.VERTICAL)
 
   layout.addView(utils.createHeader("More Options: " .. repo))
+
+  local btnStar = Button(service)
+  btnStar.setText("Checking Star Status...")
+  btnStar.setEnabled(false)
+  layout.addView(btnStar)
+
+  local currentStarsCount = 0
+  local function updateStarButtonState(isStarred, starCount)
+    currentStarsCount = starCount
+    if isStarred then
+      btnStar.setText("Unstar Repository (" .. starCount .. " Stars)")
+    else
+      btnStar.setText("Star Repository (" .. starCount .. " Stars)")
+    end
+    btnStar.setEnabled(true)
+  end
+
+  local function checkStarStatus()
+    local url = "https://api.github.com/user/starred/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo)
+    utils.httpRequest(url, "GET", nil, function(code, response)
+      local isStarred = (code == 204)
+      local countUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo)
+      utils.httpRequest(countUrl, "GET", nil, function(cCode, cResp)
+        local stars = currentStarsCount
+        if cCode == 200 and cResp then
+          pcall(function()
+            local obj = JSONObject(cResp)
+            stars = obj.optInt("stargazers_count", stars)
+          end)
+        end
+        updateStarButtonState(isStarred, stars)
+      end)
+    end)
+  end
+
+  checkStarStatus()
+
+  btnStar.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local url = "https://api.github.com/user/starred/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo)
+      btnStar.setEnabled(false)
+      utils.httpRequest(url, "GET", nil, function(code, response)
+        local isCurrentlyStarred = (code == 204)
+        local method = isCurrentlyStarred and "DELETE" or "PUT"
+
+        utils.httpRequest(url, method, "", function(actCode, actResp)
+          if actCode == 204 or actCode == 200 or actCode == 201 then
+            if isCurrentlyStarred then
+              Toast.makeText(service, "Repository unstarred!", Toast.LENGTH_SHORT).show()
+            else
+              Toast.makeText(service, "Repository starred!", Toast.LENGTH_SHORT).show()
+            end
+            checkStarStatus()
+          else
+            Toast.makeText(service, "Action failed. Check your token permissions.", Toast.LENGTH_SHORT).show()
+            btnStar.setEnabled(true)
+          end
+        end)
+      end)
+    end
+  }))
+
+  local btnDesc = Button(service)
+  btnDesc.setText("Loading Description...")
+  btnDesc.setEnabled(false)
+  layout.addView(btnDesc)
+
+  local currentDesc = ""
+  local function loadDescription()
+    local url = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo)
+    utils.httpRequest(url, "GET", nil, function(code, res)
+      if code == 200 and res then
+        pcall(function()
+          local obj = JSONObject(res)
+          if not obj.isNull("description") then
+            currentDesc = obj.optString("description", "")
+          else
+            currentDesc = ""
+          end
+        end)
+      end
+      if currentDesc ~= "" then
+        btnDesc.setText("Description: " .. currentDesc)
+      else
+        btnDesc.setText("Description: No description provided")
+      end
+      btnDesc.setEnabled(true)
+    end)
+  end
+
+  loadDescription()
+
+  btnDesc.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local dRoot = LinearLayout(service)
+      dRoot.setOrientation(LinearLayout.VERTICAL)
+      dRoot.setBackgroundColor(Color.BLACK)
+      dRoot.setPadding(20, 20, 20, 20)
+
+      local dScroll = ScrollView(service)
+      local dLayout = LinearLayout(service)
+      dLayout.setOrientation(LinearLayout.VERTICAL)
+
+      dLayout.addView(utils.createHeader("Edit Description"))
+
+      local inputDesc = EditText(service)
+      inputDesc.setHint("Type new description or leave empty...")
+      inputDesc.setText(currentDesc)
+      inputDesc.setTextColor(Color.WHITE)
+      inputDesc.setHintTextColor(Color.GRAY)
+      dLayout.addView(inputDesc)
+
+      local btnSaveDesc = Button(service)
+      btnSaveDesc.setText("Save Description")
+      btnSaveDesc.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local newDesc = tostring(inputDesc.getText()):match("^%s*(.-)%s*$")
+          local jsonBody = JSONObject()
+          jsonBody.put("description", newDesc)
+
+          httpRequestWithTimeout("Updating description...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonBody.toString(), function(pCode, pRes)
+            if pCode == 200 then
+              Toast.makeText(service, "Description updated successfully!", Toast.LENGTH_SHORT).show()
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+            else
+              Toast.makeText(service, "Failed to update description.", Toast.LENGTH_SHORT).show()
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+            end
+          end, function()
+            repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+          end)
+        end
+      }))
+      dLayout.addView(btnSaveDesc)
+
+      local btnBackDesc = Button(service)
+      btnBackDesc.setText("Back")
+      btnBackDesc.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        end
+      }))
+      dLayout.addView(btnBackDesc)
+
+      dScroll.addView(dLayout)
+      dRoot.addView(dScroll)
+      utils.enableBackKey(dRoot, function()
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+      end)
+      utils.setScreen(dRoot)
+    end
+  }))
+
+  local btnDownloadRepo = Button(service)
+  btnDownloadRepo.setText("Download Repository")
+  btnDownloadRepo.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local defaultBranch = "main"
+      utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "GET", nil, function(bCode, bRes)
+        if bCode == 200 and bRes then
+          pcall(function()
+            local bObj = JSONObject(bRes)
+            defaultBranch = bObj.optString("default_branch", "main")
+          end)
+        end
+        local zipUrl = "https://github.com/" .. owner .. "/" .. repo .. "/archive/refs/heads/" .. defaultBranch .. ".zip"
+        local fileName = repo .. "-" .. defaultBranch .. ".zip"
+        startDownloadFile(zipUrl, fileName, function()
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        end, function()
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        end)
+      end)
+    end
+  }))
+  layout.addView(btnDownloadRepo)
 
   local btnCopyRepoUrl = Button(service)
   btnCopyRepoUrl.setText("Copy Repo Link")
