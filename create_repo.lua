@@ -57,6 +57,12 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
   input.setHintTextColor(Color.GRAY)
   cLayout.addView(input)
 
+  local inputDesc = EditText(service)
+  inputDesc.setHint("Description (Optional)")
+  inputDesc.setTextColor(Color.WHITE)
+  inputDesc.setHintTextColor(Color.GRAY)
+  cLayout.addView(inputDesc)
+
   local btnSub = Button(service)
   btnSub.setText("Create")
 
@@ -75,6 +81,7 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
   btnSub.setOnClickListener(View.OnClickListener({
     onClick = function()
       local rName = tostring(input.getText())
+      local rDesc = tostring(inputDesc.getText())
       if rName ~= "" then
         httpRequestWithTimeout("Checking repository...", "https://api.github.com/user/repos?per_page=100", "GET", nil, function(code, res)
           if code == 200 then
@@ -96,7 +103,14 @@ function createRepoModule.showCreateRepoScreen(showMainScreen)
             end)
 
             local function doCreateRepo(isPrivate)
-              local json = '{"name":"' .. rName .. '","private":' .. tostring(isPrivate) .. '}'
+              local jsonObj = JSONObject()
+              jsonObj.put("name", rName)
+              jsonObj.put("private", isPrivate)
+              if rDesc ~= "" then
+                jsonObj.put("description", rDesc)
+              end
+              local json = jsonObj.toString()
+
               httpRequestWithTimeout("Creating repository...", "https://api.github.com/user/repos", "POST", json, function(cCode, cRes)
                 if cCode == 201 or cCode == 200 then
                   local succRoot = LinearLayout(service)
