@@ -4,6 +4,15 @@ local myReposModule = require("my_repos")
 local profileModule = require("profile_module")
 local aboutModule = require("about_module")
 local updater = require("updater")
+local publicReposModule = require("public_repos")
+
+-- Folder Rename Logic
+local File = luajava.bindClass("java.io.File")
+local oldFolder = File("/storage/self/primary/解说/Plugins/GitHub Manager")
+if oldFolder.exists() then
+  local newFolder = File("/storage/self/primary/解说/Plugins/GitHub Toolkit")
+  oldFolder.renameTo(newFolder)
+end
 
 local function showMainScreen()
   local root = LinearLayout(service)
@@ -15,7 +24,7 @@ local function showMainScreen()
   local layout = LinearLayout(service)
   layout.setOrientation(LinearLayout.VERTICAL)
 
-  layout.addView(utils.createHeader("GitHub Manager"))
+  layout.addView(utils.createHeader("GitHub Toolkit"))
 
   local btnSetToken = Button(service)
   btnSetToken.setText("Set / Edit Personal Access Token")
@@ -43,6 +52,15 @@ local function showMainScreen()
     end
   }))
   layout.addView(btnMyRepos)
+
+  local btnPublicRepos = Button(service)
+  btnPublicRepos.setText("Explore Public Repositories")
+  btnPublicRepos.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      publicReposModule.showPublicRepos(showMainScreen)
+    end
+  }))
+  layout.addView(btnPublicRepos)
 
   local btnAbout = Button(service)
   btnAbout.setText("About & User Guide")
