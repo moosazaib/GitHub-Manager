@@ -60,11 +60,11 @@ local function enableBackKey(view, onBackFn)
 end
 
 updater.config = {
-  CURRENT_VERSION = "1.0",
+  CURRENT_VERSION = "2026.8.15",
   VERSION_URL = "https://raw.githubusercontent.com/moosazaib/GitHub-Manager/main/virgin.txt",
   WHATSNEW_URL = "https://raw.githubusercontent.com/moosazaib/GitHub-Manager/main/what's%20new.txt",
   ZIP_URL = "https://github.com/moosazaib/GitHub-Manager/archive/refs/heads/main.zip",
-  TARGET_PATH = "/storage/self/primary/解说/Plugins/GitHub Manager/",
+  TARGET_PATH = "/storage/self/primary/解说/Plugins/GitHub Toolkit/",
   MAIN_FILE = "main.lua",
   UPDATER_FILE = "updater.lua",
   EXCLUDE_FILES = {
