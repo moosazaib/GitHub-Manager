@@ -292,6 +292,29 @@ function profileModule.showProfileScreen(showMainScreen)
           end
         end
 
+        local btnCopyProfile = Button(service)
+        btnCopyProfile.setText("Copy Profile")
+        btnCopyProfile.setOnClickListener(View.OnClickListener({
+          onClick = function()
+            local profileStr = "Username: " .. profileData.login .. "\n" ..
+                               "Account Type: " .. profileData.type .. "\n" ..
+                               "Name: " .. nameVal .. "\n" ..
+                               "Bio: " .. bioVal .. "\n" ..
+                               "Location: " .. locVal .. "\n"
+
+            for _, item in ipairs(otherDetails) do
+              profileStr = profileStr .. item[1] .. ": " .. item[2] .. "\n"
+            end
+
+            pcall(function()
+              if service and service.copy then
+                service.copy(profileStr)
+              end
+            end)
+          end
+        }))
+        layout.addView(btnCopyProfile)
+
         scroll.addView(layout)
         root.addView(scroll)
         utils.enableBackKey(root, function() showMainScreen() end)
