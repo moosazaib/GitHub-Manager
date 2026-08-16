@@ -49,6 +49,21 @@ local currentUsersList = {}
 local currentUsersPageIndex = 0
 local totalApiUsersCount = 0
 
+local function formatSize(bytes)
+  local b = tonumber(bytes) or 0
+  if b <= 0 then
+    return "0 B"
+  elseif b < 1024 then
+    return b .. " B"
+  elseif b < (1024 * 1024) then
+    return string.format("%.2f KB", b / 1024)
+  elseif b < (1024 * 1024 * 1024) then
+    return string.format("%.2f MB", b / (1024 * 1024))
+  else
+    return string.format("%.2f GB", b / (1024 * 1024 * 1024))
+  end
+end
+
 local function formatAccessibleDate(isoStr)
   if not isoStr or isoStr == "" or isoStr == "N/A" then return "N/A" end
   local y, m, d, h, min = isoStr:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+)")
@@ -225,7 +240,8 @@ local function httpPublicRequest(urlStr, method, data, callback)
       pcall(function()
         local url = URL(urlStr)
         local conn = url.openConnection()
-        conn.setRequestMethod(method or "GET")
+        local reqMethod = method or "GET"
+        conn.setRequestMethod(reqMethod)
         conn.setConnectTimeout(15000)
         conn.setReadTimeout(15000)
         conn.setRequestProperty("User-Agent", "GitHubManagerApp")
@@ -237,11 +253,14 @@ local function httpPublicRequest(urlStr, method, data, callback)
           conn.setRequestProperty("Authorization", "token " .. savedToken:match("^%s*(.-)%s*$"))
         end
 
-        if data and data ~= "" then
+        if reqMethod == "POST" or reqMethod == "PUT" or reqMethod == "PATCH" or (data and data ~= "") then
           conn.setDoOutput(true)
-          conn.setRequestProperty("Content-Type", "application/json")
+          local sendData = data or ""
+          if sendData ~= "" then
+            conn.setRequestProperty("Content-Type", "application/json")
+          end
           local os = conn.getOutputStream()
-          os.write(String(data).getBytes("UTF-8"))
+          os.write(String(sendData).getBytes("UTF-8"))
           os.flush()
           os.close()
         end
@@ -271,7 +290,7 @@ local function httpPublicRequest(urlStr, method, data, callback)
   })).start()
 end
 
-local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
+local function startDownloadFile(urlStr, saveFileName, knownTotalSize, onCancel, onSuccess)
   local isCancelled = false
   local handler = Handler(Looper.getMainLooper())
   local checkProgressRunnable
@@ -295,7 +314,7 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
   layout.addView(txtFile)
 
   local btnStatus = Button(service)
-  btnStatus.setText("Downloading... 0%")
+  btnStatus.setText("Downloading...")
   btnStatus.setEnabled(false)
   layout.addView(btnStatus)
 
@@ -397,7 +416,7 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
 
   utils.setScreen(root)
 
-  local lastPercent = -1
+  local lastStatusStr = ""
   checkProgressRunnable = Runnable({
     run = function()
       if isCancelled then return end
@@ -417,30 +436,44 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
             local totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
             local statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
 
+            if bytesIdx == -1 then bytesIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR) end
+            if totalIdx == -1 then totalIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES) end
+            if statusIdx == -1 then statusIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS) end
+
             local bytes = cursor.getLong(bytesIdx)
             local total = cursor.getLong(totalIdx)
             local status = cursor.getInt(statusIdx)
 
+            local numBytes = tonumber(bytes) or 0
+            local numTotal = tonumber(total) or 0
+            
+            if numTotal <= 0 and knownTotalSize and tonumber(knownTotalSize) and tonumber(knownTotalSize) > 0 then
+              numTotal = tonumber(knownTotalSize)
+            end
+
+            local statusStr = ""
+            if numTotal > 0 then
+              statusStr = "Downloading " .. formatSize(numBytes) .. " / " .. formatSize(numTotal)
+            else
+              statusStr = "Downloading " .. formatSize(numBytes) .. " / Unknown"
+            end
+
+            if statusStr ~= lastStatusStr then
+              lastStatusStr = statusStr
+              btnStatus.setText(statusStr)
+            end
+
             if status == DownloadManager.STATUS_SUCCESSFUL then
               isDone = true
               isSuccess = true
+              if numTotal > 0 then
+                btnStatus.setText("Downloading " .. formatSize(numTotal) .. " / " .. formatSize(numTotal))
+              else
+                btnStatus.setText("Downloading " .. formatSize(numBytes) .. " / " .. formatSize(numBytes))
+              end
             elseif status == DownloadManager.STATUS_FAILED then
               isDone = true
               isSuccess = false
-            else
-              local numBytes = tonumber(bytes) or 0
-              local numTotal = tonumber(total) or 0
-              if numTotal > 0 then
-                local percent = math.floor((numBytes * 100) / numTotal)
-                if percent > 100 then percent = 100 end
-                if percent ~= lastPercent then
-                  lastPercent = percent
-                  btnStatus.setText("Downloading... " .. percent .. "%")
-                end
-              elseif numBytes > 0 then
-                local kbLoaded = math.floor(numBytes / 1024)
-                btnStatus.setText("Downloading... " .. kbLoaded .. " KB")
-              end
             end
           end
           cursor.close()
@@ -464,13 +497,13 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
         end
       else
         if not isCancelled then
-          handler.postDelayed(checkProgressRunnable, 500)
+          handler.postDelayed(checkProgressRunnable, 200)
         end
       end
     end
   })
 
-  handler.postDelayed(checkProgressRunnable, 300)
+  handler.postDelayed(checkProgressRunnable, 100)
 end
 
 function publicRepos.showPublicUserProfile(targetUsername, onBackToParent)
@@ -479,7 +512,9 @@ function publicRepos.showPublicUserProfile(targetUsername, onBackToParent)
 
   local url = "https://api.github.com/users/" .. utils.urlEncode(targetUsername)
   httpPublicRequest(url, "GET", nil, function(code, res)
-    if utils.hideLoading then utils.hideLoading() end
+    pcall(function()
+      if utils.hideLoading then utils.hideLoading() end
+    end)
     if code == 200 and res then
       local profileData = {}
       pcall(function()
@@ -562,6 +597,27 @@ function publicRepos.showPublicUserProfile(targetUsername, onBackToParent)
         end
       end
 
+      local btnCopyProfile = Button(service)
+      btnCopyProfile.setText("Copy Profile")
+      btnCopyProfile.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local fullInfo = "Username: " .. profileData.login .. "\n" ..
+                           "Account Type: " .. profileData.type .. "\n" ..
+                           "Name: " .. ((profileData.name ~= "") and profileData.name or "No Name Added") .. "\n" ..
+                           "Bio: " .. ((profileData.bio ~= "") and profileData.bio or "No Bio Added") .. "\n" ..
+                           "Location: " .. ((profileData.location ~= "") and profileData.location or "No Location Added") .. "\n" ..
+                           "Email: " .. ((profileData.email ~= "" and profileData.email ~= "null") and profileData.email or "No Public Email") .. "\n" ..
+                           "Public Repositories: " .. profileData.public_repos .. "\n" ..
+                           "Public Gists: " .. profileData.public_gists .. "\n" ..
+                           "Followers: " .. profileData.followers .. "\n" ..
+                           "Following: " .. profileData.following .. "\n" ..
+                           "Account Created: " .. formatAccessibleDate(profileData.created_at)
+          service.copy(fullInfo)
+          Toast.makeText(service, "Profile info copied successfully", Toast.LENGTH_SHORT).show()
+        end
+      }))
+      layout.addView(btnCopyProfile)
+
       local btnFollow = Button(service)
       btnFollow.setText("Checking Status...")
       btnFollow.setEnabled(false)
@@ -641,7 +697,9 @@ function publicRepos.showPublicUserListScreen(targetUsername, listType, headerTi
 
   local url = "https://api.github.com/users/" .. utils.urlEncode(targetUsername) .. "/" .. listType .. "?per_page=100&page=" .. tostring(apiPage)
   httpPublicRequest(url, "GET", nil, function(code, res)
-    if utils.hideLoading then utils.hideLoading() end
+    pcall(function()
+      if utils.hideLoading then utils.hideLoading() end
+    end)
 
     local rawUserList = {}
     if code == 200 and res then
@@ -1556,7 +1614,8 @@ function publicRepos.showRepoDetails(item, onBackToSearch, path)
           name = obj.getString("name"),
           type = obj.getString("type"),
           path = obj.getString("path"),
-          sha = obj.optString("sha", "")
+          sha = obj.optString("sha", ""),
+          size = obj.optInt("size", 0)
         })
       end
     end)
@@ -1665,6 +1724,84 @@ function publicRepos.showMoreOptions(item, onBackToSearch, currentPath)
     end
   }))
 
+  local btnDownloadRepo = Button(service)
+  btnDownloadRepo.setText("Download Repository")
+  btnDownloadRepo.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local defaultBranch = item.default_branch or "main"
+      httpPublicRequest("https://api.github.com/repos/" .. utils.urlEncode(item.owner_login) .. "/" .. utils.urlEncode(item.name), "GET", nil, function(bCode, bRes)
+        local repoSizeInBytes = 0
+        if bCode == 200 and bRes then
+          pcall(function()
+            local bObj = JSONObject(bRes)
+            defaultBranch = bObj.optString("default_branch", defaultBranch)
+            local sizeKB = bObj.optInt("size", 0)
+            if sizeKB > 0 then
+              repoSizeInBytes = sizeKB * 1024
+            end
+          end)
+        end
+        local zipUrl = "https://github.com/" .. item.owner_login .. "/" .. item.name .. "/archive/refs/heads/" .. defaultBranch .. ".zip"
+        local fileName = item.name .. "-" .. defaultBranch .. ".zip"
+        startDownloadFile(zipUrl, fileName, repoSizeInBytes, function()
+          publicRepos.showMoreOptions(item, onBackToSearch, currentPath)
+        end, function()
+          publicRepos.showMoreOptions(item, onBackToSearch, currentPath)
+        end)
+      end)
+    end
+  }))
+  layout.addView(btnDownloadRepo)
+
+  local btnCopyRepoUrl = Button(service)
+  btnCopyRepoUrl.setText("Copy Repo Link")
+  btnCopyRepoUrl.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local repoUrl = "https://github.com/" .. item.owner_login .. "/" .. item.name
+      service.copy(repoUrl)
+    end
+  }))
+  layout.addView(btnCopyRepoUrl)
+
+  local btnCopyZipUrl = Button(service)
+  btnCopyZipUrl.setText("Copy Zip Link")
+  btnCopyZipUrl.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local defaultBranch = item.default_branch or "main"
+      local zipUrl = "https://github.com/" .. item.owner_login .. "/" .. item.name .. "/archive/refs/heads/" .. defaultBranch .. ".zip"
+      service.copy(zipUrl)
+    end
+  }))
+  layout.addView(btnCopyZipUrl)
+
+  local btnForkRepo = Button(service)
+  btnForkRepo.setText("Fork to My Repositories")
+  btnForkRepo.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      if utils.loadToken() == "" then
+        tokenModule.showTokenMissingScreen(function()
+          publicRepos.showMoreOptions(item, onBackToSearch, currentPath)
+        end)
+        return
+      end
+
+      utils.showLoading("Forking repository...")
+      local forkUrl = "https://api.github.com/repos/" .. utils.urlEncode(item.owner_login) .. "/" .. utils.urlEncode(item.name) .. "/forks"
+      httpPublicRequest(forkUrl, "POST", "", function(fCode, fRes)
+        pcall(function()
+          if utils.hideLoading then utils.hideLoading() end
+        end)
+        if fCode == 202 or fCode == 200 or fCode == 201 then
+          Toast.makeText(service, "Repository successfully forked!", Toast.LENGTH_LONG).show()
+        else
+          Toast.makeText(service, "Failed to fork repository (Error " .. tostring(fCode) .. ").", Toast.LENGTH_SHORT).show()
+        end
+        publicRepos.showMoreOptions(item, onBackToSearch, currentPath)
+      end)
+    end
+  }))
+  layout.addView(btnForkRepo)
+
   scroll.addView(layout)
   root.addView(scroll)
 
@@ -1727,11 +1864,16 @@ function publicRepos.showFileView(item, filePath, fileName, onBackToSearch, curr
     local downloadUrl = ""
     local decodedText = ""
     local parseSuccess = false
+    local fileSize = 0
 
     pcall(function()
       local obj = JSONObject(response)
       if obj.has("download_url") and not obj.isNull("download_url") then
         downloadUrl = obj.getString("download_url")
+      end
+
+      if obj.has("size") and not obj.isNull("size") then
+        fileSize = obj.getInt("size")
       end
 
       if obj.has("content") then
@@ -1754,7 +1896,7 @@ function publicRepos.showFileView(item, filePath, fileName, onBackToSearch, curr
       btnDownload.setEnabled(true)
       btnDownload.setOnClickListener(View.OnClickListener({
         onClick = function()
-          startDownloadFile(downloadUrl, fileName, function()
+          startDownloadFile(downloadUrl, fileName, fileSize, function()
             publicRepos.showFileView(item, filePath, fileName, onBackToSearch, currentPath)
           end, function()
             publicRepos.showFileView(item, filePath, fileName, onBackToSearch, currentPath)
