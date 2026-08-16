@@ -1,17 +1,2 @@
-- Extension Renamed:
-  • GitHub Manager has officially evolved into "GitHub Toolkit"! It will now appear as GitHub Toolkit in your extensions list to reflect its powerful new capabilities.
-
-- Profile Updates:
-  • Removed buggy email configuration options for a cleaner experience.
-  • View total starred repositories count, browse starred repos, and explore them directly.
-  • Full support for Followers & Following: view profiles, inspect lists, and follow/unfollow users seamlessly.
-
-- My Repositories Enhancements:
-  • Added an optional Description input field when creating a new repository.
-  • Added Sort By options and a dedicated Search Bar on the repository selection screen.
-  • Added Sort By and Search functionality inside specific repository view screens.
-  • Added 3 new features under Repository More Options: Star/Unstar repos, View & Edit repo description, and Download repository files.
-
-- New Section:
-  • Introduced a brand new "Explore Public Repositories" section on the main menu to search, browse, and download public GitHub repositories.
-Do you want to know how to use this extension? If so, visit the About page from the main menu.
+* Fixed multiple bugs and improved overall stability.
+* Added a new "Copy Profile" button to the profile screen for quick and easy data sharing.
