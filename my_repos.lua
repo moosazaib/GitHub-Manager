@@ -6,7 +6,7 @@ local repoOptionsModule = require("repo_options")
 local Handler = Handler or luajava.bindClass("android.os.Handler")
 local Looper = Looper or luajava.bindClass("android.os.Looper")
 local Runnable = Runnable or luajava.bindClass("java.lang.Runnable")
-local Toast = Toast or luajava.bindClass("android.os.Toast")
+local Toast = Toast or luajava.bindClass("android.widget.Toast")
 local String = String or luajava.bindClass("java.lang.String")
 local Base64 = Base64 or luajava.bindClass("android.util.Base64")
 local View = View or luajava.bindClass("android.view.View")
@@ -22,8 +22,14 @@ local EditText = EditText or luajava.bindClass("android.widget.EditText")
 local JSONArray = JSONArray or luajava.bindClass("org.json.JSONArray")
 local JSONObject = JSONObject or luajava.bindClass("org.json.JSONObject")
 local TextWatcher = TextWatcher or luajava.bindClass("android.widget.TextWatcher")
+local AlertDialog = AlertDialog or luajava.bindClass("android.app.AlertDialog")
+local DialogInterface = DialogInterface or luajava.bindClass("android.content.DialogInterface")
+local WindowManager = WindowManager or luajava.bindClass("android.view.WindowManager")
 
 local myReposModule = {}
+
+local currentRepoSortOption = "Name (A-Z)"
+local currentFileSortOption = "Name (A-Z)"
 
 local function doVibrate()
   pcall(function()
@@ -64,6 +70,81 @@ local function httpRequestWithTimeout(loadingText, url, method, data, callback, 
   end)
 end
 
+local function sortMyRepositoriesList(list)
+  if not list then return {} end
+  local filtered = {}
+
+  for _, v in ipairs(list) do
+    if currentRepoSortOption == "Show Private Only" then
+      if v.is_private then
+        table.insert(filtered, v)
+      end
+    elseif currentRepoSortOption == "Show Public Only" then
+      if not v.is_private then
+        table.insert(filtered, v)
+      end
+    else
+      table.insert(filtered, v)
+    end
+  end
+
+  if currentRepoSortOption == "Name (A-Z)" then
+    table.sort(filtered, function(a, b)
+      return tostring(a.name):lower() < tostring(b.name):lower()
+    end)
+  elseif currentRepoSortOption == "Name (Z-A)" then
+    table.sort(filtered, function(a, b)
+      return tostring(a.name):lower() > tostring(b.name):lower()
+    end)
+  elseif currentRepoSortOption == "Date Newest" then
+    table.sort(filtered, function(a, b)
+      return tostring(a.updated_at or "") > tostring(b.updated_at or "")
+    end)
+  elseif currentRepoSortOption == "Date Oldest" then
+    table.sort(filtered, function(a, b)
+      return tostring(a.updated_at or "") < tostring(b.updated_at or "")
+    end)
+  end
+
+  return filtered
+end
+
+local function sortMyFilesList(list)
+  if not list then return {} end
+  local sorted = {}
+  local folders = {}
+  local files = {}
+
+  for _, v in ipairs(list) do
+    if v.type == "dir" then
+      table.insert(folders, v)
+    else
+      table.insert(files, v)
+    end
+  end
+
+  local function compareItems(a, b)
+    if currentFileSortOption == "Name (A-Z)" then
+      return tostring(a.name):lower() < tostring(b.name):lower()
+    elseif currentFileSortOption == "Name (Z-A)" then
+      return tostring(a.name):lower() > tostring(b.name):lower()
+    elseif currentFileSortOption == "Date Newest" then
+      return tostring(a.sha or "") > tostring(b.sha or "")
+    elseif currentFileSortOption == "Date Oldest" then
+      return tostring(a.sha or "") < tostring(b.sha or "")
+    end
+    return false
+  end
+
+  table.sort(folders, compareItems)
+  table.sort(files, compareItems)
+
+  for _, f in ipairs(folders) do table.insert(sorted, f) end
+  for _, f in ipairs(files) do table.insert(sorted, f) end
+
+  return sorted
+end
+
 function myReposModule.showFilesList(owner, repo, path, showMainScreen)
   if utils.loadToken() == "" then
     tokenModule.showTokenMissingScreen(showMainScreen)
@@ -74,7 +155,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
 
   local url = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(path or "")
   httpRequestWithTimeout("Loading files...", url, "GET", nil, function(code, res)
-    local itemsList = {}
+    local rawItemsList = {}
     local hasItems = false
 
     if code == 200 then
@@ -91,7 +172,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
               shaVal = item.getString("sha")
             end
           end)
-          table.insert(itemsList, {
+          table.insert(rawItemsList, {
             name = item.getString("name"),
             type = item.getString("type"),
             path = item.getString("path"),
@@ -103,6 +184,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
 
     local isSelectionMode = false
     local selectedMap = {}
+    local activeSearchQuery = ""
 
     local renderScreen
     renderScreen = function()
@@ -130,7 +212,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
           end
         }))
       else
-        btnBack.setText("Back to All Repositories")
+        btnBack.setText("Back")
         btnBack.setOnClickListener(View.OnClickListener({
           onClick = function()
             if isSelectionMode then
@@ -138,7 +220,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
               selectedMap = {}
               renderScreen()
             else
-              myReposModule.showMyRepos(showMainScreen)
+              showMainScreen()
             end
           end
         }))
@@ -147,6 +229,66 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
 
       layout.addView(utils.createHeader("Repository: " .. repo))
 
+      local btnSortFiles = Button(service)
+      btnSortFiles.setText("Sort By: " .. currentFileSortOption)
+      btnSortFiles.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local options = {"Name (A-Z)", "Name (Z-A)", "Date Newest", "Date Oldest", "Cancel"}
+          pcall(function()
+            local builder = AlertDialog.Builder(service)
+            builder.setTitle("Sort By")
+            builder.setItems(options, DialogInterface.OnClickListener({
+              onClick = function(dialog, which)
+                pcall(function() dialog.dismiss() end)
+                local selectedOption = options[which + 1]
+                if selectedOption ~= "Cancel" then
+                  currentFileSortOption = selectedOption
+                  renderScreen()
+                end
+              end
+            }))
+            local dlg = builder.create()
+            pcall(function()
+              if dlg.getWindow() then
+                dlg.getWindow().setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+              end
+            end)
+            dlg.show()
+          end)
+        end
+      }))
+      layout.addView(btnSortFiles)
+
+      local edtSearchFile = EditText(service)
+      edtSearchFile.setHint("Search files in folder...")
+      edtSearchFile.setTextColor(Color.WHITE)
+      edtSearchFile.setHintTextColor(Color.GRAY)
+      if activeSearchQuery ~= "" then
+        edtSearchFile.setText(activeSearchQuery)
+      end
+      layout.addView(edtSearchFile)
+
+      local btnSearchFile = Button(service)
+      btnSearchFile.setText("Search")
+      btnSearchFile.setEnabled(activeSearchQuery ~= "")
+
+      edtSearchFile.addTextChangedListener(TextWatcher({
+        onTextChanged = function()
+          local qText = tostring(edtSearchFile.getText()):match("^%s*(.-)%s*$")
+          btnSearchFile.setEnabled(qText ~= "")
+        end,
+        beforeTextChanged = function() end,
+        afterTextChanged = function() end
+      }))
+
+      btnSearchFile.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          activeSearchQuery = tostring(edtSearchFile.getText()):match("^%s*(.-)%s*$")
+          renderScreen()
+        end
+      }))
+      layout.addView(btnSearchFile)
+
       local btnMoreOptions = Button(service)
       btnMoreOptions.setText("More Options")
       btnMoreOptions.setOnClickListener(View.OnClickListener({
@@ -154,11 +296,25 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
           repoOptionsModule.showOptions(owner, repo, nil, showMainScreen, function()
             myReposModule.showFilesList(owner, repo, path, showMainScreen)
           end, function()
-            myReposModule.showMyRepos(showMainScreen)
+            showMainScreen()
           end)
         end
       }))
       layout.addView(btnMoreOptions)
+
+      local itemsToDisplay = {}
+      if activeSearchQuery ~= "" then
+        local lowerQ = activeSearchQuery:lower()
+        for _, f in ipairs(rawItemsList) do
+          if tostring(f.name):lower():find(lowerQ, 1, true) then
+            table.insert(itemsToDisplay, f)
+          end
+        end
+      else
+        itemsToDisplay = rawItemsList
+      end
+
+      local itemsList = sortMyFilesList(itemsToDisplay)
 
       local btnSelectAll
       local updateSelectAllText = function()
@@ -286,7 +442,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
         info.setPadding(20, 20, 20, 20)
         layout.addView(info)
       else
-        if not hasItems then
+        if not hasItems or #itemsList == 0 then
           local info = TextView(service)
           info.setText("No files or folders found here.")
           info.setTextColor(Color.YELLOW)
@@ -424,7 +580,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
 
                           local btnSave = Button(service)
                           btnSave.setText("Save Changes")
-                          
+
                           local function updateFileEditState()
                             local nVal = tostring(nameBox.getText())
                             btnSave.setEnabled(nVal ~= "")
@@ -444,7 +600,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                               local newName = tostring(nameBox.getText())
                               local newText = tostring(editBox.getText())
                               local encoded = Base64.encodeToString(String(newText).getBytes("UTF-8"), Base64.NO_WRAP)
-                              
+
                               if utils.normalizeName(newName) ~= utils.normalizeName(itemName) and newName ~= "" then
                                 local dirPath = itemPath:match("(.*/)") or ""
                                 local newPath = dirPath .. newName
@@ -485,7 +641,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                             confRoot.setPadding(20, 20, 20, 20)
 
                             local confScroll = ScrollView(service)
-                            confLayout = LinearLayout(service)
+                            local confLayout = LinearLayout(service)
                             confLayout.setOrientation(LinearLayout.VERTICAL)
 
                             confLayout.addView(utils.createHeader("Confirm File Deletion"))
@@ -574,7 +730,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
         elseif path and path ~= "" then
           myReposModule.showFilesList(owner, repo, parentPath, showMainScreen)
         else
-          myReposModule.showMyRepos(showMainScreen)
+          showMainScreen()
         end
       end
       utils.enableBackKey(root, backHandler)
@@ -586,7 +742,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
     if path and path ~= "" then
       myReposModule.showFilesList(owner, repo, parentPath, showMainScreen)
     else
-      myReposModule.showMyRepos(showMainScreen)
+      showMainScreen()
     end
   end)
 end
@@ -624,20 +780,29 @@ function myReposModule.showMyRepos(showMainScreen)
       return
     end
 
-    local repoList = {}
+    local rawRepoList = {}
     pcall(function()
       local arr = JSONArray(res)
       for i = 0, arr.length() - 1 do
         local obj = arr.getJSONObject(i)
         local rName = obj.getString("name")
+        local isPriv = obj.optBoolean("private", false)
+        local updated = obj.optString("updated_at", "")
         local ownerObj = obj.getJSONObject("owner")
         local ownerName = ownerObj.getString("login")
-        table.insert(repoList, { name = rName, owner = ownerName, key = ownerName .. "/" .. rName })
+        table.insert(rawRepoList, {
+          name = rName,
+          owner = ownerName,
+          key = ownerName .. "/" .. rName,
+          is_private = isPriv,
+          updated_at = updated
+        })
       end
     end)
 
     local isSelectionMode = false
     local selectedMap = {}
+    local activeRepoSearchQuery = ""
 
     local renderScreen
     renderScreen = function()
@@ -677,6 +842,80 @@ function myReposModule.showMyRepos(showMainScreen)
         end
       }))
       rLayout.addView(btnCreateRepo)
+
+      local btnSortRepo = Button(service)
+      btnSortRepo.setText("Sort By: " .. currentRepoSortOption)
+      btnSortRepo.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local options = {"Name (A-Z)", "Name (Z-A)", "Date Newest", "Date Oldest", "Show Private Only", "Show Public Only", "Cancel"}
+          pcall(function()
+            local builder = AlertDialog.Builder(service)
+            builder.setTitle("Sort By")
+            builder.setItems(options, DialogInterface.OnClickListener({
+              onClick = function(dialog, which)
+                pcall(function() dialog.dismiss() end)
+                local selectedOption = options[which + 1]
+                if selectedOption ~= "Cancel" then
+                  currentRepoSortOption = selectedOption
+                  renderScreen()
+                end
+              end
+            }))
+            local dlg = builder.create()
+            pcall(function()
+              if dlg.getWindow() then
+                dlg.getWindow().setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+              end
+            end)
+            dlg.show()
+          end)
+        end
+      }))
+      rLayout.addView(btnSortRepo)
+
+      local edtSearchRepo = EditText(service)
+      edtSearchRepo.setHint("Search repository name...")
+      edtSearchRepo.setTextColor(Color.WHITE)
+      edtSearchRepo.setHintTextColor(Color.GRAY)
+      if activeRepoSearchQuery ~= "" then
+        edtSearchRepo.setText(activeRepoSearchQuery)
+      end
+      rLayout.addView(edtSearchRepo)
+
+      local btnSearchRepo = Button(service)
+      btnSearchRepo.setText("Search")
+      btnSearchRepo.setEnabled(activeRepoSearchQuery ~= "")
+
+      edtSearchRepo.addTextChangedListener(TextWatcher({
+        onTextChanged = function()
+          local qText = tostring(edtSearchRepo.getText()):match("^%s*(.-)%s*$")
+          btnSearchRepo.setEnabled(qText ~= "")
+        end,
+        beforeTextChanged = function() end,
+        afterTextChanged = function() end
+      }))
+
+      btnSearchRepo.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          activeRepoSearchQuery = tostring(edtSearchRepo.getText()):match("^%s*(.-)%s*$")
+          renderScreen()
+        end
+      }))
+      rLayout.addView(btnSearchRepo)
+
+      local reposToDisplay = {}
+      if activeRepoSearchQuery ~= "" then
+        local lowerQ = activeRepoSearchQuery:lower()
+        for _, r in ipairs(rawRepoList) do
+          if tostring(r.name):lower():find(lowerQ, 1, true) then
+            table.insert(reposToDisplay, r)
+          end
+        end
+      else
+        reposToDisplay = rawRepoList
+      end
+
+      local repoList = sortMyRepositoriesList(reposToDisplay)
 
       local btnSelectAll
       local updateSelectAllText = function()
@@ -834,7 +1073,9 @@ function myReposModule.showMyRepos(showMainScreen)
             btn.setText(rName)
             btn.setOnClickListener(View.OnClickListener({
               onClick = function()
-                myReposModule.showFilesList(ownerName, rName, "", showMainScreen)
+                myReposModule.showFilesList(ownerName, rName, "", function()
+                  myReposModule.showMyRepos(showMainScreen)
+                end)
               end
             }))
             btn.setOnLongClickListener(View.OnLongClickListener({
