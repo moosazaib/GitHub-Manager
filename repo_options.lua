@@ -26,6 +26,21 @@ local WindowManager = luajava.bindClass("android.view.WindowManager")
 
 local repoOptionsModule = {}
 
+local function formatSize(bytes)
+  local b = tonumber(bytes) or 0
+  if b <= 0 then
+    return "0 B"
+  elseif b < 1024 then
+    return b .. " B"
+  elseif b < (1024 * 1024) then
+    return string.format("%.2f KB", b / 1024)
+  elseif b < (1024 * 1024 * 1024) then
+    return string.format("%.2f MB", b / (1024 * 1024))
+  else
+    return string.format("%.2f GB", b / (1024 * 1024 * 1024))
+  end
+end
+
 local function httpRequestWithTimeout(loadingText, url, method, data, callback, fallbackScreen)
   if loadingText then
     utils.showLoading(loadingText)
@@ -56,7 +71,7 @@ local function httpRequestWithTimeout(loadingText, url, method, data, callback, 
   end)
 end
 
-local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
+local function startDownloadFile(urlStr, saveFileName, knownTotalSize, onCancel, onSuccess)
   local isCancelled = false
   local handler = Handler(Looper.getMainLooper())
   local checkProgressRunnable
@@ -80,7 +95,7 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
   layout.addView(txtFile)
 
   local btnStatus = Button(service)
-  btnStatus.setText("Downloading... 0%")
+  btnStatus.setText("Downloading...")
   btnStatus.setEnabled(false)
   layout.addView(btnStatus)
 
@@ -182,7 +197,7 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
 
   utils.setScreen(root)
 
-  local lastPercent = -1
+  local lastStatusStr = ""
   checkProgressRunnable = Runnable({
     run = function()
       if isCancelled then return end
@@ -212,20 +227,30 @@ local function startDownloadFile(urlStr, saveFileName, onCancel, onSuccess)
 
             local numBytes = tonumber(bytes) or 0
             local numTotal = tonumber(total) or 0
+            if numTotal <= 0 and knownTotalSize and tonumber(knownTotalSize) and tonumber(knownTotalSize) > 0 then
+              numTotal = tonumber(knownTotalSize)
+            end
 
+            local statusStr = ""
             if numTotal > 0 then
-              local percent = math.floor((numBytes * 100) / numTotal)
-              if percent > 100 then percent = 100 end
-              if percent ~= lastPercent then
-                lastPercent = percent
-                btnStatus.setText("Downloading... " .. percent .. "%")
-              end
+              statusStr = "Downloading " .. formatSize(numBytes) .. " / " .. formatSize(numTotal)
+            else
+              statusStr = "Downloading " .. formatSize(numBytes) .. " / Unknown"
+            end
+
+            if statusStr ~= lastStatusStr then
+              lastStatusStr = statusStr
+              btnStatus.setText(statusStr)
             end
 
             if status == DownloadManager.STATUS_SUCCESSFUL then
               isDone = true
               isSuccess = true
-              btnStatus.setText("Downloading... 100%")
+              if numTotal > 0 then
+                btnStatus.setText("Downloading " .. formatSize(numTotal) .. " / " .. formatSize(numTotal))
+              else
+                btnStatus.setText("Downloading " .. formatSize(numBytes) .. " / " .. formatSize(numBytes))
+              end
             elseif status == DownloadManager.STATUS_FAILED then
               isDone = true
               isSuccess = false
@@ -450,15 +475,20 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
     onClick = function()
       local defaultBranch = "main"
       utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "GET", nil, function(bCode, bRes)
+        local repoSizeInBytes = 0
         if bCode == 200 and bRes then
           pcall(function()
             local bObj = JSONObject(bRes)
             defaultBranch = bObj.optString("default_branch", "main")
+            local sizeKB = bObj.optInt("size", 0)
+            if sizeKB > 0 then
+              repoSizeInBytes = sizeKB * 1024
+            end
           end)
         end
         local zipUrl = "https://github.com/" .. owner .. "/" .. repo .. "/archive/refs/heads/" .. defaultBranch .. ".zip"
         local fileName = repo .. "-" .. defaultBranch .. ".zip"
-        startDownloadFile(zipUrl, fileName, function()
+        startDownloadFile(zipUrl, fileName, repoSizeInBytes, function()
           repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
         end, function()
           repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
@@ -1003,14 +1033,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       for _, fItem in ipairs(files) do
         local cb = CheckBox(service)
         local bytes = fItem.length()
-        local sizeStr = ""
-        if bytes < (1024 * 1024) then
-          local szKb = math.floor(bytes / 1024)
-          sizeStr = szKb .. " KB"
-        else
-          local szMb = bytes / (1024 * 1024)
-          sizeStr = string.format("%.2f MB", szMb)
-        end
+        local sizeStr = formatSize(bytes)
 
         cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ")")
         cb.setTextColor(Color.WHITE)
