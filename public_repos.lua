@@ -572,7 +572,18 @@ function publicRepos.showPublicUserProfile(targetUsername, onBackToParent)
         txt.setPadding(10, 10, 10, 10)
         layout.addView(txt)
 
-        if item[1] == "Followers" then
+        if item[1] == "Public Repositories" then
+          local btnViewRepos = Button(service)
+          btnViewRepos.setText("View Public Repositories")
+          btnViewRepos.setOnClickListener(View.OnClickListener({
+            onClick = function()
+              publicRepos.showPublicRepos(function()
+                publicRepos.showPublicUserProfile(targetUsername, onBackToParent)
+              end, profileData.login, true, true)
+            end
+          }))
+          layout.addView(btnViewRepos)
+        elseif item[1] == "Followers" then
           local btnViewFollowers = Button(service)
           btnViewFollowers.setText("View Followers List")
           btnViewFollowers.setOnClickListener(View.OnClickListener({
@@ -948,7 +959,7 @@ function publicRepos.showPublicUserListScreen(targetUsername, listType, headerTi
   end)
 end
 
-local function searchRepositories(query, container, mainOnBack)
+local function searchRepositories(query, container, mainOnBack, isUserOnly)
   container.removeAllViews()
 
   local loadingText = TextView(service)
@@ -959,6 +970,59 @@ local function searchRepositories(query, container, mainOnBack)
 
   local cleanQuery = query:match("^%s*(.-)%s*$")
   cachedQueryForPagination = cleanQuery
+
+  if isUserOnly then
+    local urlUser = "https://api.github.com/users/" .. utils.urlEncode(cleanQuery) .. "/repos"
+    httpPublicRequest(urlUser, "GET", nil, function(code, response)
+      container.removeAllViews()
+      local userItemsList = {}
+      if code == 200 and response then
+        pcall(function()
+          local arr = JSONArray(response)
+          for i = 0, arr.length() - 1 do
+            local itemObj = arr.getJSONObject(i)
+            local repoName = itemObj.getString("name")
+            local fullName = itemObj.getString("full_name")
+            local stars = itemObj.optInt("stargazers_count", 0)
+            local desc = itemObj.optString("description", "No description")
+            local defaultBranch = itemObj.optString("default_branch", "main")
+            local updatedAt = itemObj.optString("updated_at", "")
+            
+            local ownerName = cleanQuery
+            pcall(function()
+              if itemObj.has("owner") then
+                ownerName = itemObj.getJSONObject("owner").getString("login")
+              end
+            end)
+
+            table.insert(userItemsList, {
+              name = repoName,
+              full_name = fullName,
+              stars = stars,
+              description = desc,
+              default_branch = defaultBranch,
+              owner_login = ownerName,
+              updated_at = updatedAt
+            })
+          end
+        end)
+      end
+
+      if #userItemsList > 0 then
+        lastFetchedItems = userItemsList
+        currentPageIndex = 0
+        renderRepositories(container, userItemsList, query, mainOnBack)
+      else
+        lastFetchedItems = {}
+        currentPageIndex = 0
+        local emptyText = TextView(service)
+        emptyText.setText("No public repositories found for user: " .. cleanQuery)
+        emptyText.setTextColor(Color.YELLOW)
+        container.addView(emptyText)
+      end
+    end)
+    return
+  end
 
   local ownerMatch, repoMatch = cleanQuery:match("github%.com/([^/]+)/([^/%s/?#]+)")
   if not ownerMatch or not repoMatch then
@@ -1210,7 +1274,7 @@ renderRepositories = function(container, items, query, mainOnBack)
   end
 end
 
-function publicRepos.showPublicRepos(mainOnBack, initialQuery)
+function publicRepos.showPublicRepos(mainOnBack, initialQuery, skipHistory, isUserOnly)
   local root = LinearLayout(service)
   root.setOrientation(LinearLayout.VERTICAL)
   root.setBackgroundColor(Color.BLACK)
@@ -1229,7 +1293,11 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
   }))
   layout.addView(btnBack)
 
-  layout.addView(utils.createHeader("Public Repositories"))
+  local headerTitle = "Public Repositories"
+  if skipHistory and initialQuery and initialQuery ~= "" then
+    headerTitle = initialQuery .. "'s Public Repositories"
+  end
+  layout.addView(utils.createHeader(headerTitle))
 
   local resultsContainer = LinearLayout(service)
   resultsContainer.setOrientation(LinearLayout.VERTICAL)
@@ -1316,7 +1384,7 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
       btnClearAll.setOnClickListener(View.OnClickListener({
         onClick = function()
           clearAllSearchHistory()
-          publicRepos.showPublicRepos(mainOnBack, initialQuery)
+          publicRepos.showPublicRepos(mainOnBack, initialQuery, skipHistory, isUserOnly)
         end
       }))
       historyContainer.addView(btnClearAll)
@@ -1345,7 +1413,7 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
         btnDelete.setOnClickListener(View.OnClickListener({
           onClick = function()
             deleteQueryFromHistory(hQuery)
-            publicRepos.showPublicRepos(mainOnBack, initialQuery)
+            publicRepos.showPublicRepos(mainOnBack, initialQuery, skipHistory, isUserOnly)
           end
         }))
         rowLayout.addView(btnDelete)
@@ -1355,7 +1423,7 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
     end
   end
 
-  if not initialQuery or initialQuery == "" then
+  if not skipHistory and (not initialQuery or initialQuery == "") then
     layout.addView(txtHeader)
     layout.addView(historyContainer)
     renderHistory()
@@ -1371,8 +1439,10 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
           layout.removeView(txtHeader)
           layout.removeView(historyContainer)
         end)
-        addQueryToHistory(query)
-        searchRepositories(query, resultsContainer, mainOnBack)
+        if not skipHistory then
+          addQueryToHistory(query)
+        end
+        searchRepositories(query, resultsContainer, mainOnBack, isUserOnly)
       end
     end
   }))
@@ -1387,11 +1457,13 @@ function publicRepos.showPublicRepos(mainOnBack, initialQuery)
   utils.setScreen(root)
 
   if initialQuery and initialQuery ~= "" then
-    addQueryToHistory(initialQuery)
+    if not skipHistory then
+      addQueryToHistory(initialQuery)
+    end
     if lastFetchedItems and cachedQueryForPagination == initialQuery:match("^%s*(.-)%s*$") then
       renderRepositories(resultsContainer, lastFetchedItems, initialQuery, mainOnBack)
     else
-      searchRepositories(initialQuery, resultsContainer, mainOnBack)
+      searchRepositories(initialQuery, resultsContainer, mainOnBack, isUserOnly)
     end
   end
 end
