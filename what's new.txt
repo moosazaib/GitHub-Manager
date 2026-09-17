@@ -1,2 +1,5 @@
-* Fixed multiple bugs and improved overall stability.
-* Added a new "Copy Profile" button to the profile screen for quick and easy data sharing.
+* Create New Folders Directly: You can now create new folders inside your repository via 'More Options'. If a folder already exists, the app displays "Folder Already Exist" and returns to the options window.
+* Updated Button Name: Renamed 'Copy repo link' button to 'Copy Current Directory Link' in 'My Repositories' More Options.
+* View Public Repositories: Added a 'View Public Repositories' button to public profiles, allowing you to search and view all public repositories of that user.
+* General Improvements: Minor UI polish and stability enhancements.
+Do you want to know how to use this extension? If so, visit the About page from the main menu.
