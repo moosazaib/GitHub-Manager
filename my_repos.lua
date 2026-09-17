@@ -297,7 +297,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
             myReposModule.showFilesList(owner, repo, path, showMainScreen)
           end, function()
             showMainScreen()
-          end)
+          end, path)
         end
       }))
       layout.addView(btnMoreOptions)
