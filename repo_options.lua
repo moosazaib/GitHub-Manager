@@ -5,7 +5,7 @@ local createRepoModule = require("create_repo")
 local Handler = Handler or luajava.bindClass("android.os.Handler")
 local Looper = Looper or luajava.bindClass("android.os.Looper")
 local Runnable = Runnable or luajava.bindClass("java.lang.Runnable")
-local Toast = Toast or luajava.bindClass("android.os.Toast")
+local Toast = Toast or luajava.bindClass("android.widget.Toast")
 
 local File = luajava.bindClass("java.io.File")
 local FileInputStream = luajava.bindClass("java.io.FileInputStream")
@@ -286,10 +286,19 @@ local function startDownloadFile(urlStr, saveFileName, knownTotalSize, onCancel,
   handler.postDelayed(checkProgressRunnable, 100)
 end
 
-function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
   if utils.loadToken() == "" then
     tokenModule.showTokenMissingScreen(showMainScreen)
     return
+  end
+
+  local function getFullPath(targetName)
+    local cleanName = targetName:gsub("^/+", "")
+    if currentPath and currentPath ~= "" then
+      local cleanPath = currentPath:gsub("/+$", "")
+      return cleanPath .. "/" .. cleanName
+    end
+    return cleanName
   end
 
   if isPrivate == nil then
@@ -301,7 +310,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
           fetchedPrivate = obj.getBoolean("private")
         end)
       end
-      repoOptionsModule.showOptions(owner, repo, fetchedPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+      repoOptionsModule.showOptions(owner, repo, fetchedPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
     end, function() onBackToRepo() end)
     return
   end
@@ -439,13 +448,13 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
           httpRequestWithTimeout("Updating description...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonBody.toString(), function(pCode, pRes)
             if pCode == 200 then
               Toast.makeText(service, "Description updated successfully!", Toast.LENGTH_SHORT).show()
-              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
             else
               Toast.makeText(service, "Failed to update description.", Toast.LENGTH_SHORT).show()
-              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
             end
           end, function()
-            repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+            repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
           end)
         end
       }))
@@ -455,7 +464,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       btnBackDesc.setText("Back")
       btnBackDesc.setOnClickListener(View.OnClickListener({
         onClick = function()
-          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
         end
       }))
       dLayout.addView(btnBackDesc)
@@ -463,7 +472,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       dScroll.addView(dLayout)
       dRoot.addView(dScroll)
       utils.enableBackKey(dRoot, function()
-        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
       end)
       utils.setScreen(dRoot)
     end
@@ -489,9 +498,9 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
         local zipUrl = "https://github.com/" .. owner .. "/" .. repo .. "/archive/refs/heads/" .. defaultBranch .. ".zip"
         local fileName = repo .. "-" .. defaultBranch .. ".zip"
         startDownloadFile(zipUrl, fileName, repoSizeInBytes, function()
-          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
         end, function()
-          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
         end)
       end)
     end
@@ -499,11 +508,15 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
   layout.addView(btnDownloadRepo)
 
   local btnCopyRepoUrl = Button(service)
-  btnCopyRepoUrl.setText("Copy Repo Link")
+  btnCopyRepoUrl.setText("Copy Current Directory Link")
   btnCopyRepoUrl.setOnClickListener(View.OnClickListener({
     onClick = function()
-      local repoUrl = "https://github.com/" .. owner .. "/" .. repo
-      service.copy(repoUrl)
+      local targetUrl = "https://github.com/" .. owner .. "/" .. repo
+      if currentPath and currentPath ~= "" then
+        targetUrl = targetUrl .. "/tree/main/" .. currentPath
+      end
+      service.copy(targetUrl)
+      Toast.makeText(service, "Copied to clipboard", Toast.LENGTH_SHORT).show()
     end
   }))
   layout.addView(btnCopyRepoUrl)
@@ -514,6 +527,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
     onClick = function()
       local zipUrl = "https://github.com/" .. owner .. "/" .. repo .. "/archive/refs/heads/main.zip"
       service.copy(zipUrl)
+      Toast.makeText(service, "Copied to clipboard", Toast.LENGTH_SHORT).show()
     end
   }))
   layout.addView(btnCopyZipUrl)
@@ -565,26 +579,20 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
 
       btnSubmit.setOnClickListener(View.OnClickListener({
         onClick = function()
-          local fileName = tostring(inputName.getText())
+          local fileName = tostring(inputName.getText()):match("^%s*(.-)%s*$")
           local fileContent = tostring(inputContent.getText())
           if fileName ~= "" then
-            httpRequestWithTimeout("Checking file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/", "GET", nil, function(code, res)
+            local fullFilePath = getFullPath(fileName)
+            httpRequestWithTimeout("Checking file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(fullFilePath), "GET", nil, function(code, res)
               local found = false
-              local existingFileName = ""
+              local existingFilePath = fullFilePath
               local fileSha = ""
-              if code == 200 then
+              if code == 200 and res then
                 pcall(function()
-                  local arr = JSONArray(res)
-                  for i = 0, arr.length() - 1 do
-                    local item = arr.getJSONObject(i)
-                    local name = item.getString("name")
-                    if utils.normalizeName(name) == utils.normalizeName(fileName) then
-                      found = true
-                      existingFileName = name
-                      fileSha = item.getString("sha")
-                      break
-                    end
-                  end
+                  local obj = JSONObject(res)
+                  found = true
+                  existingFilePath = obj.optString("path", fullFilePath)
+                  fileSha = obj.optString("sha", "")
                 end)
               end
 
@@ -596,7 +604,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
                 else
                   json = '{"message":"Created via GitHub Manager","content":"' .. encoded .. '"}'
                 end
-                httpRequestWithTimeout("Saving file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(shaToUse and shaToUse ~= "" and existingFileName or fileName), "PUT", json, function(cCode, cRes)
+                httpRequestWithTimeout("Saving file...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(existingFilePath), "PUT", json, function(cCode, cRes)
                   if cCode == 201 or cCode == 200 then
                     local succRoot = LinearLayout(service)
                     succRoot.setOrientation(LinearLayout.VERTICAL)
@@ -627,6 +635,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
                     utils.enableBackKey(succRoot, function() onBackToRepo() end)
                     utils.setScreen(succRoot)
                   else
+                    Toast.makeText(service, "Failed to save file.", Toast.LENGTH_SHORT).show()
                     onBackToRepo()
                   end
                 end, function() onBackToRepo() end)
@@ -644,7 +653,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
 
                 confLayout.addView(utils.createHeader("File Exists"))
                 local info = TextView(service)
-                info.setText("File '" .. existingFileName .. "' already exists. Do you want to overwrite it?")
+                info.setText("File '" .. fileName .. "' already exists. Do you want to overwrite it?")
                 info.setTextColor(Color.YELLOW)
                 info.setTextSize(16)
                 info.setPadding(20, 20, 20, 20)
@@ -662,18 +671,18 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
                 local btnNo = Button(service)
                 btnNo.setText("Cancel")
                 btnNo.setOnClickListener(View.OnClickListener({
-                  onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end
+                  onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
                 }))
                 confLayout.addView(btnNo)
 
                 confScroll.addView(confLayout)
                 confRoot.addView(confScroll)
-                utils.enableBackKey(confRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+                utils.enableBackKey(confRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
                 utils.setScreen(confRoot)
               else
                 doSaveFile(nil)
               end
-            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
           end
         end
       }))
@@ -682,17 +691,260 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       local btnBack = Button(service)
       btnBack.setText("Back")
       btnBack.setOnClickListener(View.OnClickListener({
-        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end
+        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
       }))
       uLayout.addView(btnBack)
 
       uScroll.addView(uLayout)
       uRoot.addView(uScroll)
-      utils.enableBackKey(uRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+      utils.enableBackKey(uRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
       utils.setScreen(uRoot)
     end
   }))
   layout.addView(btnCreateTextFile)
+
+  local btnCreateFolder = Button(service)
+  btnCreateFolder.setText("Create Folder")
+  btnCreateFolder.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      local fRoot = LinearLayout(service)
+      fRoot.setOrientation(LinearLayout.VERTICAL)
+      fRoot.setBackgroundColor(Color.BLACK)
+      fRoot.setPadding(20, 20, 20, 20)
+
+      local fScroll = ScrollView(service)
+      local fLayout = LinearLayout(service)
+      fLayout.setOrientation(LinearLayout.VERTICAL)
+
+      fLayout.addView(utils.createHeader("Create Folder in " .. repo))
+
+      local inputFolderName = EditText(service)
+      inputFolderName.setHint("Folder Name e.g. my_folder")
+      inputFolderName.setTextColor(Color.WHITE)
+      inputFolderName.setHintTextColor(Color.GRAY)
+      fLayout.addView(inputFolderName)
+
+      local btnSubmitFolder = Button(service)
+      btnSubmitFolder.setText("Create Folder")
+
+      local function updateFolderState()
+        local fVal = tostring(inputFolderName.getText()):match("^%s*(.-)%s*$")
+        btnSubmitFolder.setEnabled(fVal ~= "")
+      end
+      updateFolderState()
+
+      inputFolderName.addTextChangedListener(TextWatcher({
+        onTextChanged = function() updateFolderState() end,
+        beforeTextChanged = function() end,
+        afterTextChanged = function() end
+      }))
+
+      btnSubmitFolder.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local folderName = tostring(inputFolderName.getText()):match("^%s*(.-)%s*$")
+          if folderName ~= "" then
+            folderName = folderName:gsub("^/+", ""):gsub("/+$", "")
+            local fullFolderPath = getFullPath(folderName)
+
+            local checkUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(fullFolderPath)
+            httpRequestWithTimeout("Checking folder...", checkUrl, "GET", nil, function(code, res)
+              local exists = false
+              if code == 200 and res then
+                pcall(function()
+                  if res:sub(1,1) == "[" then
+                    exists = true
+                  else
+                    local obj = JSONObject(res)
+                    if obj.optString("type") == "dir" then
+                      exists = true
+                    end
+                  end
+                end)
+              end
+
+              if exists then
+                pcall(function()
+                  local builder = AlertDialog.Builder(service)
+                  builder.setMessage("This folder is already exist")
+                  local dlg = builder.create()
+                  pcall(function()
+                    if dlg.getWindow() then
+                      dlg.getWindow().setType(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY)
+                    end
+                  end)
+                  dlg.show()
+
+                  Handler(Looper.getMainLooper()).postDelayed(Runnable({
+                    run = function()
+                      pcall(function() dlg.dismiss() end)
+                      repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                    end
+                  }), 500)
+                end)
+              else
+                local defaultBranch = "main"
+                utils.httpRequest("https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "GET", nil, function(bCode, bRes)
+                  if bCode == 200 and bRes then
+                    pcall(function()
+                      local bObj = JSONObject(bRes)
+                      defaultBranch = bObj.optString("default_branch", "main")
+                    end)
+                  end
+
+                  local refUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/git/refs/heads/" .. utils.urlEncode(defaultBranch)
+                  httpRequestWithTimeout("Creating folder...", refUrl, "GET", nil, function(rCode, rRes)
+                    if rCode == 200 and rRes then
+                      local latestCommitSha = ""
+                      pcall(function()
+                        local rObj = JSONObject(rRes)
+                        latestCommitSha = rObj.getJSONObject("object").optString("sha", "")
+                      end)
+
+                      if latestCommitSha ~= "" then
+                        local commitUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/git/commits/" .. latestCommitSha
+                        httpRequestWithTimeout("Creating folder...", commitUrl, "GET", nil, function(cCode, cRes)
+                          if cCode == 200 and cRes then
+                            local baseTreeSha = ""
+                            pcall(function()
+                              local cObj = JSONObject(cRes)
+                              baseTreeSha = cObj.getJSONObject("tree").optString("sha", "")
+                            end)
+
+                            if baseTreeSha ~= "" then
+                              local treeJson = '{"base_tree":"' .. baseTreeSha .. '","tree":[{"path":"' .. fullFolderPath .. '","mode":"040000","type":"tree","sha":"4b825dc642cb6eb9a060e54bf8d69288fbee4904"}]}'
+                              local postTreeUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/git/trees"
+                              httpRequestWithTimeout("Creating folder...", postTreeUrl, "POST", treeJson, function(tCode, tRes)
+                                if tCode == 201 and tRes then
+                                  local newTreeSha = ""
+                                  pcall(function()
+                                    local tObj = JSONObject(tRes)
+                                    newTreeSha = tObj.optString("sha", "")
+                                  end)
+
+                                  if newTreeSha ~= "" then
+                                    local newCommitJson = '{"message":"Create folder ' .. fullFolderPath .. ' via GitHub Manager","tree":"' .. newTreeSha .. '","parents":["' .. latestCommitSha .. '"]}'
+                                    local postCommitUrl = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/git/commits"
+                                    httpRequestWithTimeout("Creating folder...", postCommitUrl, "POST", newCommitJson, function(ncCode, ncRes)
+                                      if ncCode == 201 and ncRes then
+                                        local newCommitSha = ""
+                                        pcall(function()
+                                          local ncObj = JSONObject(ncRes)
+                                          newCommitSha = ncObj.optString("sha", "")
+                                        end)
+
+                                        if newCommitSha ~= "" then
+                                          local updateRefJson = '{"sha":"' .. newCommitSha .. '"}'
+                                          httpRequestWithTimeout("Creating folder...", refUrl, "PATCH", updateRefJson, function(uCode, uRes)
+                                            if uCode == 200 then
+                                              Toast.makeText(service, "Folder created successfully!", Toast.LENGTH_SHORT).show()
+                                              onBackToRepo()
+                                            else
+                                              Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                                              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                                            end
+                                          end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+                                        else
+                                          Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                                          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                                        end
+                                      else
+                                        Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                                        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                                      end
+                                    end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+                                  else
+                                    Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                                    repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                                  end
+                                else
+                                  Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                                  repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                                end
+                              end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+                            else
+                              Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                            end
+                          else
+                            Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                            repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                          end
+                        end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+                      else
+                        Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                      end
+                    else
+                      Toast.makeText(service, "Failed to create folder.", Toast.LENGTH_SHORT).show()
+                      repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+                    end
+                  end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+                end)
+              end
+            end, function()
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+            end)
+          end
+        end
+      }))
+      fLayout.addView(btnSubmitFolder)
+
+      local btnBackF = Button(service)
+      btnBackF.setText("Back")
+      btnBackF.setOnClickListener(View.OnClickListener({
+        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
+      }))
+      fLayout.addView(btnBackF)
+
+      fScroll.addView(fLayout)
+      fRoot.addView(fScroll)
+      utils.enableBackKey(fRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+      utils.setScreen(fRoot)
+    end
+  }))
+  layout.addView(btnCreateFolder)
+
+  local function showUploadErrorDialog(fileName, errCode, errRes)
+    local errRoot = LinearLayout(service)
+    errRoot.setOrientation(LinearLayout.VERTICAL)
+    errRoot.setBackgroundColor(Color.BLACK)
+    errRoot.setPadding(20, 20, 20, 20)
+
+    local errScroll = ScrollView(service)
+    local errLayout = LinearLayout(service)
+    errLayout.setOrientation(LinearLayout.VERTICAL)
+
+    errLayout.addView(utils.createHeader("Upload Error Log"))
+
+    local infoTv = TextView(service)
+    infoTv.setText("File: " .. tostring(fileName) .. "\nHTTP Code: " .. tostring(errCode) .. "\n\nResponse:\n" .. tostring(errRes or "No Response Body"))
+    infoTv.setTextColor(Color.RED)
+    infoTv.setTextSize(14)
+    infoTv.setPadding(10, 10, 10, 10)
+    errLayout.addView(infoTv)
+
+    local btnCopy = Button(service)
+    btnCopy.setText("Copy Error Log")
+    btnCopy.setOnClickListener(View.OnClickListener({
+      onClick = function()
+        service.copy("File: " .. tostring(fileName) .. "\nHTTP Code: " .. tostring(errCode) .. "\nResponse: " .. tostring(errRes))
+        Toast.makeText(service, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+      end
+    }))
+    errLayout.addView(btnCopy)
+
+    local btnOk = Button(service)
+    btnOk.setText("Close")
+    btnOk.setOnClickListener(View.OnClickListener({
+      onClick = function() onBackToRepo() end
+    }))
+    errLayout.addView(btnOk)
+
+    errScroll.addView(errLayout)
+    errRoot.addView(errScroll)
+    utils.enableBackKey(errRoot, function() onBackToRepo() end)
+    utils.setScreen(errRoot)
+  end
 
   local function processUploadQueue(queue, index)
     if index > #queue then
@@ -729,24 +981,18 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
 
     local currentFile = queue[index]
     local fileName = currentFile.getName()
+    local fullUploadPath = getFullPath(fileName)
 
-    httpRequestWithTimeout("Checking file " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/", "GET", nil, function(code, res)
+    httpRequestWithTimeout("Checking file " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(fullUploadPath), "GET", nil, function(code, res)
       local found = false
-      local existingFileName = ""
+      local existingFilePath = fullUploadPath
       local fileSha = ""
-      if code == 200 then
+      if code == 200 and res then
         pcall(function()
-          local arr = JSONArray(res)
-          for i = 0, arr.length() - 1 do
-            local item = arr.getJSONObject(i)
-            local name = item.getString("name")
-            if utils.normalizeName(name) == utils.normalizeName(fileName) then
-              found = true
-              existingFileName = name
-              fileSha = item.getString("sha")
-              break
-            end
-          end
+          local obj = JSONObject(res)
+          found = true
+          existingFilePath = obj.optString("path", fullUploadPath)
+          fileSha = obj.optString("sha", "")
         end)
       end
 
@@ -771,11 +1017,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
             Handler(Looper.getMainLooper()).post(Runnable({
               run = function()
                 if encoded == "" then
-                  if service and service.speak then
-                    service.speak("Failed to read file " .. fileName)
-                  end
-                  Toast.makeText(service, "Failed to read file: " .. fileName, Toast.LENGTH_SHORT).show()
-                  processUploadQueue(queue, index + 1)
+                  showUploadErrorDialog(fileName, 0, "Failed to read file from local storage")
                   return
                 end
                 local json = ""
@@ -784,9 +1026,13 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
                 else
                   json = '{"message":"Created via GitHub Manager","content":"' .. encoded .. '"}'
                 end
-                httpRequestWithTimeout("Uploading " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(shaToUse and shaToUse ~= "" and existingFileName or fileName), "PUT", json, function(cCode, cRes)
-                  processUploadQueue(queue, index + 1)
-                end, function() processUploadQueue(queue, index + 1) end)
+                httpRequestWithTimeout("Uploading " .. index .. "/" .. #queue .. " (" .. fileName .. ")...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(existingFilePath), "PUT", json, function(cCode, cRes)
+                  if cCode ~= 200 and cCode ~= 201 then
+                    showUploadErrorDialog(fileName, cCode, cRes)
+                  else
+                    processUploadQueue(queue, index + 1)
+                  end
+                end, function() showUploadErrorDialog(fileName, -1, "Request Timed Out") end)
               end
             }))
           end
@@ -800,12 +1046,12 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
         confRoot.setPadding(20, 20, 20, 20)
 
         local confScroll = ScrollView(service)
-        local confLayout = LinearLayout(service)
+        confLayout = LinearLayout(service)
         confLayout.setOrientation(LinearLayout.VERTICAL)
 
         confLayout.addView(utils.createHeader("File Exists (" .. index .. "/" .. #queue .. ")"))
         local info = TextView(service)
-        info.setText("File '" .. existingFileName .. "' already exists. Do you want to overwrite it or remove it from list?")
+        info.setText("File '" .. fileName .. "' already exists. Do you want to overwrite it or remove it from list?")
         info.setTextColor(Color.YELLOW)
         info.setTextSize(16)
         info.setPadding(20, 20, 20, 20)
@@ -836,30 +1082,30 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       else
         doUpload(nil)
       end
-    end, function() processUploadQueue(queue, index + 1) end)
+    end, function() showUploadErrorDialog(fileName, -1, "Checking file timed out") end)
   end
 
   local function openFilePicker(path)
-    local currentPath = path
-    if not currentPath or currentPath == "" then
+    local currentLocalPath = path
+    if not currentLocalPath or currentLocalPath == "" then
       pcall(function()
         local prefs = service.getSharedPreferences("github_manager_prefs", 0)
         local saved = prefs.getString("last_upload_path", "")
         if saved and saved ~= "" then
           local checkFile = File(saved)
           if checkFile.exists() and checkFile.isDirectory() and checkFile.canRead() then
-            currentPath = saved
+            currentLocalPath = saved
           end
         end
       end)
     end
 
-    if not currentPath or currentPath == "" then
+    if not currentLocalPath or currentLocalPath == "" then
       pcall(function()
-        currentPath = Environment.getExternalStorageDirectory().getAbsolutePath()
+        currentLocalPath = Environment.getExternalStorageDirectory().getAbsolutePath()
       end)
-      if not currentPath or currentPath == "" then
-        currentPath = "/sdcard"
+      if not currentLocalPath or currentLocalPath == "" then
+        currentLocalPath = "/sdcard"
       end
     end
 
@@ -879,13 +1125,13 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       rootStoragePath = Environment.getExternalStorageDirectory().getAbsolutePath()
     end)
     local dirDisplayName = ""
-    if currentPath == rootStoragePath or currentPath == "/sdcard" or currentPath == "/storage/emulated/0" then
+    if currentLocalPath == rootStoragePath or currentLocalPath == "/sdcard" or currentLocalPath == "/storage/emulated/0" then
       dirDisplayName = "Internal Storage"
     else
-      local fCurr = File(currentPath)
+      local fCurr = File(currentLocalPath)
       dirDisplayName = fCurr.getName()
       if not dirDisplayName or dirDisplayName == "" then
-        dirDisplayName = currentPath
+        dirDisplayName = currentLocalPath
       end
     end
 
@@ -895,14 +1141,14 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
     pathInfo.setPadding(10, 10, 10, 10)
     pLayout.addView(pathInfo)
 
-    local fDir = File(currentPath)
+    local fDir = File(currentLocalPath)
     local parentFile = fDir.getParentFile()
 
     local function goBackDir()
       if parentFile and parentFile.exists() and parentFile.canRead() and parentFile.getAbsolutePath() ~= "/" then
         openFilePicker(parentFile.getAbsolutePath())
       else
-        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
       end
     end
 
@@ -910,7 +1156,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
     btnBackOpt.setText("Back to Options")
     btnBackOpt.setOnClickListener(View.OnClickListener({
       onClick = function()
-        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
       end
     }))
     pLayout.addView(btnBackOpt)
@@ -986,7 +1232,7 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       onClick = function()
         pcall(function()
           local prefs = service.getSharedPreferences("github_manager_prefs", 0)
-          prefs.edit().putString("last_upload_path", currentPath).apply()
+          prefs.edit().putString("last_upload_path", currentLocalPath).apply()
         end)
         local queue = {}
         for _, f in pairs(selectedFilesMap) do
@@ -1139,156 +1385,157 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
             local jsonRename = '{"name":"' .. newRName .. '"}'
             httpRequestWithTimeout("Renaming repository...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonRename, function(renCode, renRes)
               if renCode == 200 then
-                repoOptionsModule.showOptions(owner, newRName, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+                repoOptionsModule.showOptions(owner, newRName, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
               else
-                repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
+                repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
               end
-            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
           end
         end
       }))
       rLayout.addView(btnSubmitRename)
 
-      local btnBackRen = Button(service)
-      btnBackRen.setText("Back")
-      btnBackRen.setOnClickListener(View.OnClickListener({
-        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end
+      local btnBackR = Button(service)
+      btnBackR.setText("Back")
+      btnBackR.setOnClickListener(View.OnClickListener({
+        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
       }))
-      rLayout.addView(btnBackRen)
+      rLayout.addView(btnBackR)
 
       rScroll.addView(rLayout)
       rRoot.addView(rScroll)
-      utils.enableBackKey(rRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+      utils.enableBackKey(rRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
       utils.setScreen(rRoot)
     end
   }))
   layout.addView(btnRenameRepo)
 
-  local visStatusStr = isPrivate and "Private" or "Public"
   local btnToggleVisibility = Button(service)
-  btnToggleVisibility.setText("Visibility: " .. visStatusStr)
+  if isPrivate then
+    btnToggleVisibility.setText("Make Public")
+  else
+    btnToggleVisibility.setText("Make Private")
+  end
+
   btnToggleVisibility.setOnClickListener(View.OnClickListener({
     onClick = function()
-      local vRoot = LinearLayout(service)
-      vRoot.setOrientation(LinearLayout.VERTICAL)
-      vRoot.setBackgroundColor(Color.BLACK)
-      vRoot.setPadding(20, 20, 20, 20)
+      local confRoot = LinearLayout(service)
+      confRoot.setOrientation(LinearLayout.VERTICAL)
+      confRoot.setBackgroundColor(Color.BLACK)
+      confRoot.setPadding(20, 20, 20, 20)
 
-      local vScroll = ScrollView(service)
-      local vLayout = LinearLayout(service)
-      vLayout.setOrientation(LinearLayout.VERTICAL)
+      local confScroll = ScrollView(service)
+      local confLayout = LinearLayout(service)
+      confLayout.setOrientation(LinearLayout.VERTICAL)
 
-      vLayout.addView(utils.createHeader("Visibility: " .. repo))
+      confLayout.addView(utils.createHeader("Change Visibility"))
 
-      local vInfo = TextView(service)
-      vInfo.setText("Current Visibility: " .. visStatusStr)
-      vInfo.setTextColor(Color.YELLOW)
-      vInfo.setTextSize(16)
-      vInfo.setPadding(20, 20, 20, 20)
-      vLayout.addView(vInfo)
+      local targetVis = isPrivate and "PUBLIC" or "PRIVATE"
+      local confInfo = TextView(service)
+      confInfo.setText("Are you sure you want to make '" .. repo .. "' " .. targetVis .. "?")
+      confInfo.setTextColor(Color.YELLOW)
+      confInfo.setTextSize(16)
+      confInfo.setPadding(20, 20, 20, 20)
+      confLayout.addView(confInfo)
 
-      if isPrivate then
-        local btnMakePublic = Button(service)
-        btnMakePublic.setText("Make Public")
-        btnMakePublic.setOnClickListener(View.OnClickListener({
-          onClick = function()
-            httpRequestWithTimeout("Changing to Public...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":false}', function(pCode, pRes)
-              repoOptionsModule.showOptions(owner, repo, false, showMainScreen, onBackToRepo, onRepoDeleted)
-            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
-          end
-        }))
-        vLayout.addView(btnMakePublic)
-      else
-        local btnMakePrivate = Button(service)
-        btnMakePrivate.setText("Make Private")
-        btnMakePrivate.setOnClickListener(View.OnClickListener({
-          onClick = function()
-            httpRequestWithTimeout("Changing to Private...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", '{"private":true}', function(pCode, pRes)
-              repoOptionsModule.showOptions(owner, repo, true, showMainScreen, onBackToRepo, onRepoDeleted)
-            end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
-          end
-        }))
-        vLayout.addView(btnMakePrivate)
-      end
-
-      local btnBackVis = Button(service)
-      btnBackVis.setText("Cancel")
-      btnBackVis.setOnClickListener(View.OnClickListener({
-        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end
+      local btnConfirmVis = Button(service)
+      btnConfirmVis.setText("Yes, Change to " .. targetVis)
+      btnConfirmVis.setOnClickListener(View.OnClickListener({
+        onClick = function()
+          local newPrivateState = not isPrivate
+          local jsonBody = '{"private":' .. tostring(newPrivateState) .. '}'
+          httpRequestWithTimeout("Changing visibility...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "PATCH", jsonBody, function(vCode, vRes)
+            if vCode == 200 then
+              Toast.makeText(service, "Visibility updated successfully!", Toast.LENGTH_SHORT).show()
+              repoOptionsModule.showOptions(owner, repo, newPrivateState, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+            else
+              Toast.makeText(service, "Failed to change visibility.", Toast.LENGTH_SHORT).show()
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+            end
+          end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+        end
       }))
-      vLayout.addView(btnBackVis)
+      confLayout.addView(btnConfirmVis)
 
-      vScroll.addView(vLayout)
-      vRoot.addView(vScroll)
-      utils.enableBackKey(vRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
-      utils.setScreen(vRoot)
+      local btnCancelVis = Button(service)
+      btnCancelVis.setText("Cancel")
+      btnCancelVis.setOnClickListener(View.OnClickListener({
+        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
+      }))
+      confLayout.addView(btnCancelVis)
+
+      confScroll.addView(confLayout)
+      confRoot.addView(confScroll)
+      utils.enableBackKey(confRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+      utils.setScreen(confRoot)
     end
   }))
   layout.addView(btnToggleVisibility)
 
-  local btnDelete = Button(service)
-  btnDelete.setText("Delete Repository")
-  btnDelete.setOnClickListener(View.OnClickListener({
+  local btnDeleteRepo = Button(service)
+  btnDeleteRepo.setText("Delete Repository")
+  btnDeleteRepo.setOnClickListener(View.OnClickListener({
     onClick = function()
-      local rConfRoot = LinearLayout(service)
-      rConfRoot.setOrientation(LinearLayout.VERTICAL)
-      rConfRoot.setBackgroundColor(Color.BLACK)
-      rConfRoot.setPadding(20, 20, 20, 20)
+      local confRoot = LinearLayout(service)
+      confRoot.setOrientation(LinearLayout.VERTICAL)
+      confRoot.setBackgroundColor(Color.BLACK)
+      confRoot.setPadding(20, 20, 20, 20)
 
-      local rConfScroll = ScrollView(service)
-      local rConfLayout = LinearLayout(service)
-      rConfLayout.setOrientation(LinearLayout.VERTICAL)
+      local confScroll = ScrollView(service)
+      local confLayout = LinearLayout(service)
+      confLayout.setOrientation(LinearLayout.VERTICAL)
 
-      rConfLayout.addView(utils.createHeader("Confirm Repository Deletion"))
+      confLayout.addView(utils.createHeader("Confirm Repository Deletion"))
 
-      local rConfInfo = TextView(service)
-      rConfInfo.setText("Are you sure you want to delete repository '" .. repo .. "'? This action cannot be undone.")
-      rConfInfo.setTextColor(Color.YELLOW)
-      rConfInfo.setTextSize(16)
-      rConfInfo.setPadding(20, 20, 20, 20)
-      rConfLayout.addView(rConfInfo)
+      local confInfo = TextView(service)
+      confInfo.setText("Are you sure you want to permanently delete repository '" .. repo .. "'?")
+      confInfo.setTextColor(Color.RED)
+      confInfo.setTextSize(16)
+      confInfo.setPadding(20, 20, 20, 20)
+      confLayout.addView(confInfo)
 
-      local btnConfirmRepoDel = Button(service)
-      btnConfirmRepoDel.setText("Yes, Delete Repository")
-      btnConfirmRepoDel.setOnClickListener(View.OnClickListener({
+      local btnConfirmDel = Button(service)
+      btnConfirmDel.setText("Yes, Delete Repository")
+      btnConfirmDel.setOnClickListener(View.OnClickListener({
         onClick = function()
           httpRequestWithTimeout("Deleting repository...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo), "DELETE", nil, function(dCode, dRes)
-            if onRepoDeleted then
+            if dCode == 204 or dCode == 200 then
+              Toast.makeText(service, "Repository deleted successfully!", Toast.LENGTH_SHORT).show()
               onRepoDeleted()
             else
-              showMainScreen()
+              Toast.makeText(service, "Failed to delete repository.", Toast.LENGTH_SHORT).show()
+              repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
             end
-          end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
+          end, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
         end
       }))
-      rConfLayout.addView(btnConfirmRepoDel)
+      confLayout.addView(btnConfirmDel)
 
-      local btnCancelRepoDel = Button(service)
-      btnCancelRepoDel.setText("Cancel")
-      btnCancelRepoDel.setOnClickListener(View.OnClickListener({
-        onClick = function()
-          repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted)
-        end
+      local btnCancelDel = Button(service)
+      btnCancelDel.setText("Cancel")
+      btnCancelDel.setOnClickListener(View.OnClickListener({
+        onClick = function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end
       }))
-      rConfLayout.addView(btnCancelRepoDel)
+      confLayout.addView(btnCancelDel)
 
-      rConfScroll.addView(rConfLayout)
-      rConfRoot.addView(rConfScroll)
-      utils.enableBackKey(rConfRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted) end)
-      utils.setScreen(rConfRoot)
+      confScroll.addView(confLayout)
+      confRoot.addView(confScroll)
+      utils.enableBackKey(confRoot, function() repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath) end)
+      utils.setScreen(confRoot)
     end
   }))
-  layout.addView(btnDelete)
+  layout.addView(btnDeleteRepo)
 
-  local btnClose = Button(service)
-  btnClose.setText("Close Options")
-  btnClose.setOnClickListener(View.OnClickListener({
+  local btnBack = Button(service)
+  btnBack.setText("Back to Repository")
+  btnBack.setOnClickListener(View.OnClickListener({
     onClick = function() onBackToRepo() end
   }))
-  layout.addView(btnClose)
+  layout.addView(btnBack)
 
   scroll.addView(layout)
   root.addView(scroll)
+
   utils.enableBackKey(root, function() onBackToRepo() end)
   utils.setScreen(root)
 end
