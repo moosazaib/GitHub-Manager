@@ -1,4 +1,5 @@
 local utils = require("utils")
+local updater = require("updater")
 
 local aboutModule = {}
 
@@ -20,6 +21,13 @@ function aboutModule.showAboutScreen(showMainScreen)
   layout.addView(btnBack)
 
   layout.addView(utils.createHeader("About & User Guide"))
+
+  local infoVersion = TextView(service)
+  infoVersion.setText("v" .. updater.config.CURRENT_VERSION)
+  infoVersion.setTextColor(Color.GREEN)
+  infoVersion.setTextSize(16)
+  infoVersion.setPadding(20, 10, 20, 10)
+  layout.addView(infoVersion)
 
   local infoCreator = TextView(service)
   infoCreator.setText("Created with brilliance and mastery by Moosa Zaib!\nThis powerful extension brings complete GitHub repository and file management right onto your device with absolute speed and convenience.")
