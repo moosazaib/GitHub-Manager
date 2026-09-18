@@ -145,6 +145,79 @@ local function sortMyFilesList(list)
   return sorted
 end
 
+local function fetchAllFilesUnderPath(owner, repo, targetPath, onComplete)
+  local fileList = {}
+  local isEmptyDir = true
+
+  local function traverse(currentPath, cb)
+    local url = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(currentPath or "")
+    httpRequestWithTimeout("Loading files and folders...", url, "GET", nil, function(code, res)
+      if code == 200 then
+        local items = {}
+        pcall(function()
+          local arr = JSONArray(res)
+          if arr.length() > 0 then
+            isEmptyDir = false
+          end
+          for i = 0, arr.length() - 1 do
+            local item = arr.getJSONObject(i)
+            table.insert(items, {
+              name = item.getString("name"),
+              type = item.getString("type"),
+              path = item.getString("path"),
+              sha = item.has("sha") and not item.isNull("sha") and item.getString("sha") or ""
+            })
+          end
+        end)
+        local index = 1
+        local function processNext()
+          if index > #items then
+            cb()
+            return
+          end
+          local it = items[index]
+          index = index + 1
+          if it.type == "dir" then
+            traverse(it.path, processNext)
+          else
+            table.insert(fileList, it)
+            processNext()
+          end
+        end
+        processNext()
+      else
+        cb()
+      end
+    end, function() cb() end)
+  end
+
+  traverse(targetPath, function()
+    if isEmptyDir then
+      local placeholderPath = targetPath .. "/.placeholder"
+      local encoded = Base64.encodeToString(String("").getBytes("UTF-8"), Base64.NO_WRAP)
+      local jsonCreate = '{"message":"Temporary file for folder deletion","content":"' .. encoded .. '"}'
+      httpRequestWithTimeout("Cleaning up empty folder...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(placeholderPath), "PUT", jsonCreate, function(cCode, cRes)
+        if cCode == 201 or cCode == 200 then
+          pcall(function()
+            local obj = JSONObject(cRes)
+            local contentObj = obj.getJSONObject("content")
+            local pSha = contentObj.getString("sha")
+            table.insert(fileList, {
+              name = ".placeholder",
+              type = "file",
+              path = placeholderPath,
+              sha = pSha
+            })
+          end)
+        end
+        onComplete(fileList)
+      end, function() onComplete(fileList) end)
+    else
+      onComplete(fileList)
+    end
+  end)
+end
+
 function myReposModule.showFilesList(owner, repo, path, showMainScreen)
   if utils.loadToken() == "" then
     tokenModule.showTokenMissingScreen(showMainScreen)
@@ -154,7 +227,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
   local parentPath = (path and path ~= "") and (path:match("(.+)/[^/]+$") or "") or nil
 
   local url = "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(path or "")
-  httpRequestWithTimeout("Loading files...", url, "GET", nil, function(code, res)
+  httpRequestWithTimeout("Loading files and folders...", url, "GET", nil, function(code, res)
     local rawItemsList = {}
     local hasItems = false
 
@@ -260,7 +333,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
       layout.addView(btnSortFiles)
 
       local edtSearchFile = EditText(service)
-      edtSearchFile.setHint("Search files in folder...")
+      edtSearchFile.setHint("Search files and folders in folder...")
       edtSearchFile.setTextColor(Color.WHITE)
       edtSearchFile.setHintTextColor(Color.GRAY)
       if activeSearchQuery ~= "" then
@@ -356,7 +429,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
         layout.addView(btnSelectAll)
 
         local btnDeleteSelected = Button(service)
-        btnDeleteSelected.setText("Delete Selected Files")
+        btnDeleteSelected.setText("Delete")
         btnDeleteSelected.setOnClickListener(View.OnClickListener({
           onClick = function()
             local confRoot = LinearLayout(service)
@@ -368,41 +441,66 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
             local confLayout = LinearLayout(service)
             confLayout.setOrientation(LinearLayout.VERTICAL)
 
-            confLayout.addView(utils.createHeader("Confirm File Deletion"))
+            confLayout.addView(utils.createHeader("Confirm Deletion"))
 
             local confInfo = TextView(service)
-            confInfo.setText("Are you sure you want to delete selected files?")
+            confInfo.setText("Are you sure you want to delete")
             confInfo.setTextColor(Color.YELLOW)
             confInfo.setTextSize(16)
             confInfo.setPadding(20, 20, 20, 20)
             confLayout.addView(confInfo)
 
             local btnConfirmDel = Button(service)
-            btnConfirmDel.setText("Yes, Delete Selected Files")
+            btnConfirmDel.setText("Yes Delete")
             btnConfirmDel.setOnClickListener(View.OnClickListener({
               onClick = function()
-                local toDelete = {}
+                local selectedItems = {}
                 for _, it in ipairs(itemsList) do
                   if selectedMap[it.path] then
-                    table.insert(toDelete, it)
+                    table.insert(selectedItems, it)
                   end
                 end
 
-                local function doDelete(idx)
-                  if idx > #toDelete then
-                    myReposModule.showFilesList(owner, repo, path, showMainScreen)
+                local filesToDelete = {}
+                local itemIdx = 1
+
+                local function prepareDeleteList()
+                  if itemIdx > #selectedItems then
+                    local delIdx = 1
+                    local function doDelete()
+                      if delIdx > #filesToDelete then
+                        myReposModule.showFilesList(owner, repo, path, showMainScreen)
+                        return
+                      end
+                      local itemDel = filesToDelete[delIdx]
+                      delIdx = delIdx + 1
+                      local jsonDelete = '{"message":"Deleted via GitHub Manager","sha":"' .. itemDel.sha .. '"}'
+                      httpRequestWithTimeout("Deleting files and folders...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemDel.path), "DELETE", jsonDelete, function(dCode, dRes)
+                        doDelete()
+                      end, function()
+                        doDelete()
+                      end)
+                    end
+                    doDelete()
                     return
                   end
-                  local itemDel = toDelete[idx]
-                  local jsonDelete = '{"message":"Deleted via GitHub Manager","sha":"' .. itemDel.sha .. '"}'
-                  httpRequestWithTimeout("Deleting files...", "https://api.github.com/repos/" .. utils.urlEncode(owner) .. "/" .. utils.urlEncode(repo) .. "/contents/" .. utils.urlEncode(itemDel.path), "DELETE", jsonDelete, function(dCode, dRes)
-                    doDelete(idx + 1)
-                  end, function()
-                    doDelete(idx + 1)
-                  end)
+
+                  local it = selectedItems[itemIdx]
+                  itemIdx = itemIdx + 1
+                  if it.type == "dir" then
+                    fetchAllFilesUnderPath(owner, repo, it.path, function(subFiles)
+                      for _, sf in ipairs(subFiles) do
+                        table.insert(filesToDelete, sf)
+                      end
+                      prepareDeleteList()
+                    end)
+                  else
+                    table.insert(filesToDelete, it)
+                    prepareDeleteList()
+                  end
                 end
 
-                doDelete(1)
+                prepareDeleteList()
               end
             }))
             confLayout.addView(btnConfirmDel)
@@ -429,14 +527,14 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
 
       if code == 404 then
         local info = TextView(service)
-        info.setText("This repository is empty or has no files in this folder.")
+        info.setText("This repository is empty or has no files and folders in this folder.")
         info.setTextColor(Color.YELLOW)
         info.setTextSize(16)
         info.setPadding(20, 20, 20, 20)
         layout.addView(info)
       elseif code ~= 200 then
         local info = TextView(service)
-        info.setText("Error loading files: " .. code)
+        info.setText("Error loading files and folders: " .. code)
         info.setTextColor(Color.RED)
         info.setTextSize(16)
         info.setPadding(20, 20, 20, 20)
@@ -654,7 +752,7 @@ function myReposModule.showFilesList(owner, repo, path, showMainScreen)
                             confLayout.addView(confInfo)
 
                             local btnConfirmDel = Button(service)
-                            btnConfirmDel.setText("Yes, Delete File")
+                            btnConfirmDel.setText("Yes Delete")
                             btnConfirmDel.setOnClickListener(View.OnClickListener({
                               onClick = function()
                                 local jsonDelete = '{"message":"Deleted via GitHub Manager","sha":"' .. sha .. '"}'
@@ -979,7 +1077,7 @@ function myReposModule.showMyRepos(showMainScreen)
             confLayout.addView(confInfo)
 
             local btnConfirmDel = Button(service)
-            btnConfirmDel.setText("Yes, Delete Selected Repositories")
+            btnConfirmDel.setText("Yes Delete")
             btnConfirmDel.setOnClickListener(View.OnClickListener({
               onClick = function()
                 local toDelete = {}
