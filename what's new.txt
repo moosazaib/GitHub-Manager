@@ -1,5 +1,3 @@
-1:
-addet current version to about page.
-2:
-bug fixes and UI  improvements.
-Do you want to know how to use this extension? If so, visit the About page from the main menu.
+- Sincere apologies, but the regular repository file upload limit has been adjusted from 50MB to 25MB for better stability.
+- To make up for it, a new 'Releases' button has been added inside More Options, allowing you to upload files up to 2GB!
+- For complete details and step-by-step instructions on how to use Releases, please read Step 10 to Step 14 in the About & User Guide.
