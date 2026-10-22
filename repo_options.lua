@@ -1,6 +1,7 @@
 local utils = require("utils")
 local tokenModule = require("token_module")
 local createRepoModule = require("create_repo")
+local releasesModule = require("releases_module")
 
 local Handler = Handler or luajava.bindClass("android.os.Handler")
 local Looper = Looper or luajava.bindClass("android.os.Looper")
@@ -477,6 +478,17 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
       utils.setScreen(dRoot)
     end
   }))
+
+  local btnReleases = Button(service)
+  btnReleases.setText("Releases")
+  btnReleases.setOnClickListener(View.OnClickListener({
+    onClick = function()
+      releasesModule.showReleases(owner, repo, function()
+        repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, onBackToRepo, onRepoDeleted, currentPath)
+      end)
+    end
+  }))
+  layout.addView(btnReleases)
 
   local btnDownloadRepo = Button(service)
   btnDownloadRepo.setText("Download Repository")
@@ -1004,20 +1016,23 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
             pcall(function()
               local fis = FileInputStream(currentFile)
               local baos = ByteArrayOutputStream()
-              local buffer = Array.newInstance(Byte.TYPE, 65536)
+              local Base64OutputStream = luajava.bindClass("android.util.Base64OutputStream")
+              local b64os = Base64OutputStream(baos, Base64.NO_WRAP)
+              local buffer = Array.newInstance(Byte.TYPE, 16384)
               local len = fis.read(buffer)
               while len > 0 do
-                baos.write(buffer, 0, len)
+                b64os.write(buffer, 0, len)
                 len = fis.read(buffer)
               end
+              b64os.close()
               fis.close()
-              encoded = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+              encoded = baos.toString("UTF-8")
             end)
 
             Handler(Looper.getMainLooper()).post(Runnable({
               run = function()
                 if encoded == "" then
-                  showUploadErrorDialog(fileName, 0, "Failed to read file from local storage")
+                  showUploadErrorDialog(fileName, 0, "Failed to read file from local storage. Check file permissions or storage access.")
                   return
                 end
                 local json = ""
@@ -1284,16 +1299,16 @@ function repoOptionsModule.showOptions(owner, repo, isPrivate, showMainScreen, o
         cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ")")
         cb.setTextColor(Color.WHITE)
 
-        if bytes > (50 * 1024 * 1024) then
+        if bytes > (25 * 1024 * 1024) then
           cb.setEnabled(false)
           cb.setTextColor(Color.GRAY)
-          cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ") - Exceeds 50MB")
+          cb.setText("[File] " .. fItem.getName() .. " (" .. sizeStr .. ") - Exceeds 25MB")
           cb.setOnClickListener(View.OnClickListener({
             onClick = function()
               if service and service.speak then
-                service.speak("File size exceeds 50MB limit")
+                service.speak("File size exceeds 25MB limit")
               else
-                Toast.makeText(service, "File size exceeds 50MB limit!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(service, "File size exceeds 25MB limit!", Toast.LENGTH_SHORT).show()
               end
             end
           }))
